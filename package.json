@@ -1,0 +1,48 @@
+{
+  "name": "@ichinese/open-sdk",
+  "version": "1.0.0-rc.1",
+  "description": "Server SDK for the iChinese open platform (open API, tokens, events, web login): Node.js 20+",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ichinese-cn/open-sdk-node.git"
+  },
+  "homepage": "https://github.com/ichinese-cn/open-sdk-node#readme",
+  "bugs": {
+    "url": "https://github.com/ichinese-cn/open-sdk-node/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.4"
+  }
+}
