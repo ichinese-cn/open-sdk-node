@@ -1,5 +1,7 @@
 # iChinese Open Platform SDK for Node.js
 
+> **Prerelease 1.0.0-rc.2.** 这是预发布版，开放平台还没有正式开放，SDK 的默认地址可能连不上。This is a prerelease: the open platform is not open to the public yet, so the SDK's default address may not answer.
+
 爱中文开放平台的 Node.js 服务端 SDK：开放接口（`/open-apis/v1`）的每个接口都是一个方法，并处理令牌、重试、分页和事件推送。
 
 The server SDK of the iChinese open platform. Every operation of the open API is a method on `Client`
