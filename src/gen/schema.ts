@@ -264,6 +264,35 @@ export interface paths {
         /** 班级的课次（时间段内，最多 100 天） */
         get: operations["listClassSessions"];
         put?: never;
+        /**
+         * 给班级排课次（一次，或按周重复），在线或在本机构的教学点
+         * @description 和老师在班级课表里排课一样：查老师在各区的时间（撞了 409 `teacher_busy`），排好的课次进成员的课表、发提醒，
+         *     并推 `schedule.session_changed`（`change = scheduled`）。还没上架的班（草稿）排的课次也是草稿，上架时才进课表。
+         *     地点：`place` 不传跟着班级的默认地点，`null` 在线，给 `venue_id` 就在这个教学点（必须是班级所属机构的，`note` 写教室）。
+         *     教学点还没发布也能排，只是班级上架前要发布；关了或被下架的教学点 409 `venue_unavailable`。
+         *     个人老师的班、公开课只能在线（409 `online_only`）。
+         */
+        post: operations["createClassSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/classes/{class_id}/sessions/{session_id}/place": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 改一次课（或这一次及同一系列以后的课）的地点
+         * @description 和班级课表里「改地点」一样：成员收到通知、不用回复，跟着这些课次的约课地点也改，推 `schedule.session_changed`（`change = place_changed`）。
+         *     `place` 为 `null` 改成在线；地点的规则同 `createClassSessions`。已经结束、取消的课次 409 `not_editable`。
+         */
+        put: operations["setClassSessionPlace"];
         post?: never;
         delete?: never;
         options?: never;
@@ -655,12 +684,23 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 试听时段（默认只列没结束的，按时间） */
+        /**
+         * 试听时间（教学点上的试听自己的时间；默认只列没结束的，按时间）
+         * @description 开课里「试听」的单独时间（这个试听专用的时间，可以几个人一起约）。老师的每周可约时间是所有 1v1 和试听共用的，不在这里列。
+         *     线上试听没有教学点，不在这里列。
+         */
         get: operations["listTrialSlots"];
         put?: never;
         /**
-         * 排试听时段（可以按周重复）；教学点要已发布
-         * @description 409 `venue_not_published`；开始时间已过 400。老师在平台里指定（第一批不按 open_id 指定老师）。
+         * 开试听时间（可以按周重复）：加到已有的试听，或开一份新的试听草稿
+         * @description 试听是平台「开课」里的一种课，学员在它的页面上约时间，老师或机构在「约课」里确认。这里直接读写同一套：
+         *     - 给 `opening_id`（`GET /openings?kind=trial` 或之前返回的 `opening_id`）：把时间加到这份试听上，老师是它的老师，`duration_minutes` 要等于它每节的时长（否则 400）。
+         *       它在招生中时，学员马上能约；已经结束或下架的 409 `opening_ended`。
+         *     - 不给 `opening_id`：给 `venue_id`、`course_title`（可带 `teacher_open_id`）。同一个教学点、同一个名字、同一位老师、同样时长的试听还没结束时加到那份上，
+         *       否则开一份新的**试听草稿**。草稿和平台里开的一样，要机构在「开课」里上架（上架前检查老师、时间和教学点是否发布，照常审核），这里不能上架。
+         *       没给老师的草稿缺老师，用 `PUT /trial/openings/{opening_id}/teacher` 补上。
+         *     时间不能早于现在（400），同一位老师的时间不能重叠（409 `slot_overlap`）。教学点关了或被下架 409 `venue_unavailable`，
+         *     不是本机构的 404。`series_id` 一直是 null（新的约课没有「系列」）。
          */
         post: operations["createTrialSlots"];
         delete?: never;
@@ -678,8 +718,32 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 取消一个试听时段（已约的人照常收到通知，预约随之取消） */
+        /**
+         * 关掉一个试听时间（不再能约；已有的约课不变，也不通知）
+         * @description 和老师在「约课」里关掉一个时间一样；已经约满的 409 `slot_taken`（要取消的是约课）。
+         */
         post: operations["cancelTrialSlot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/trial/openings/{opening_id}/teacher": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 给一份试听草稿补上（或换）老师
+         * @description 只能改草稿（还没上架、没在审核）：409 `not_draft`。老师要是本机构在机构所在区的老师（否则 400），他这些时间不能和他别的时间重叠（409 `slot_overlap`）。
+         *     这份试听的时间都换成这位老师的。也用来补以前用这组接口开的、缺老师的试听。
+         */
+        put: operations["setTrialTeacher"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -693,7 +757,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 机构各教学点的试听预约 */
+        /**
+         * 机构各教学点的试听预约
+         * @description 在本机构教学点上的试听课的约课（开课里开的「试听」商品，学员在商品页约时间），新约的在前。线上试听没有教学点，不在这里列出。
+         *     状态：`pending` 等老师确认；`reschedule_proposed` 老师换了时间、等学员同意；`confirmed` 约上了；`rejected` 老师没接受；
+         *     `cancelled` 学员或机构取消（老师没来、退回的也算）；`expired` 到时间还没确认；`attended` 上过了。
+         */
         get: operations["listTrialBookings"];
         put?: never;
         post?: never;
@@ -712,8 +781,119 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 确认一个试听预约 */
+        /**
+         * 确认一个试听预约
+         * @description 和老师在「约课」里确认一样：排一节课次并告诉学员。不是等确认的 409 `not_requested`，已经到时间 409 `too_late`，老师那时有课 409 `teacher_busy`。
+         */
         post: operations["confirmTrialBooking"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/venues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 机构的教学点（校区），新建的在前
+         * @description 所有状态的都列（草稿、等审核、已发布、停用、被下架）；`shown` 为 true 的才在地图和发现里给人看。
+         */
+        get: operations["listVenues"];
+        put?: never;
+        /**
+         * 新建一个教学点（校区）的草稿；发布在平台里，照常审核
+         * @description 和机构后台「教学点」里新建一样，存成草稿（`status = draft`），不公开。要公开得由机构在平台里提交，按机构的审核规则发布；
+         *     照片、「咨询」转给谁也在平台里设。草稿就能用来排课（`createClassSessions` 的 `place`），只是班级上架前教学点要发布。
+         *     机构还没认证 403 `org_not_verified`。
+         */
+        post: operations["createVenue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/venues/{venue_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一个教学点（只限本机构的） */
+        get: operations["getVenue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/openings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 开课：开的每一个班和课（多人班、1v1、公开课、试听、视频课），新开的在前
+         * @description 和平台「开课」列表同一套（只读）。机构令牌列本机构的；用户令牌只列这个人以个人老师身份开的课（不属于任何机构的），
+         *     他在机构里教的课要用那家机构的机构令牌读。状态：`draft` 草稿；`review` 老师交了、等机构审；`enrolling` 招生中；
+         *     `running` 开始上了；`ended` 结束了或下架了。上架、下架、改课都在平台里做。
+         */
+        get: operations["listOpenings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/openings/{opening_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一个开课 */
+        get: operations["getOpening"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 机构看板的一页（只读）：招生、教学、校区、收入、社区和活动
+         * @description 和机构工作台「数据」同一套数（M6.19 的每日汇总和实时的课次、订单），只给机构令牌、只限本机构。
+         *     - 页（`tab`）：`enrollment` 招生、`teaching` 教学、`venues` 校区、`income` 收入、`community` 社区和活动；不带时是 `enrollment`。
+         *       平台里的「老师」（每位老师的数）和「接待」（谁接了咨询）两页不开放：老师的数只在机构内部看、不排名；接待是内部流程。
+         *     - **少于 5 人在接口里就压掉了**：人数是 1–4 时给 null、`withheld: true`；比例的分母、平均分的条数也要 ≥5。课次、小时、金额、次数不是人数，不压。
+         *     - **金额按币种分开，不换算**：一页一种币种（`currency`，不带时是收入最多的那种），`filters.currencies` 列出有哪几种。
+         *     - 时间：`range`（截止今天、含今天）或自定义 `from`、`to`（机构时区的本地日期，含两头，最多 366 天，不能晚于今天）；`compare` 多给上一周期。
+         *     - 没有任何一个人的 ID 或名字；按课程、校区、活动的行带它们的名字。别的区的学员只在汇总里，别的区某项不到 5 不给；有区没答上 `partial: true`。
+         */
+        get: operations["getInsights"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -729,6 +909,47 @@ export interface paths {
         };
         /** 机构的订单（只读对账）。跟钱有关的写操作不开放 */
         get: operations["listTradeOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 机构的约课（1v1 和试听，只读对账），上课时间晚的在前
+         * @description 学员在开课里约的每一节课，和平台「约课」同一套。确认、拒绝、换时间、取消都在平台里做（试听的确认见 `confirmTrialBooking`）。
+         *     状态：`requested` 等老师确认（`change.kind = teacher_proposed` 是老师换了时间、等学员同意）；`confirmed` 约上了
+         *     （`change.kind` 是 `teacher_moved` 或 `learner_requested` 时有一个改期等回复）；`declined` 老师没接受；`cancelled` 取消了；
+         *     `expired` 到时间还没确认；`completed` 上过了（`outcome` 写学员来没来）；`missed` 老师没来，这一节退回了。
+         *     只给学员的 `open_id`，不给名字和留言。
+         */
+        get: operations["listBookings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bookings/{booking_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一节约课 */
+        get: operations["getBooking"];
         put?: never;
         post?: never;
         delete?: never;
@@ -866,6 +1087,241 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/community/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 要一个图片上传地址（发帖时才重新编码、去掉 EXIF）
+         * @description 用 `upload_url` 把图片 PUT 上去（`headers` 照带），发帖时在 `images` 里写 `key`。一天内没用上的会被删掉。
+         *     图片最大 10 MB，jpeg、png、webp、gif。这个人每小时最多要 60 次（和他自己在 App 里传图算在一起）。
+         *     只有要到地址的这个应用能把它放进帖子。
+         */
+        post: operations["createCommunityImageUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/community/videos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 要一个视频上传地址（最大 4 GB、1 小时）
+         * @description 用 `upload.url` 把视频 PUT 上去，再 `POST /community/videos/{asset_id}/complete`。转码好了收到 `community.video_ready`，
+         *     也可以查 `GET /community/videos/{asset_id}`。一周内没用上的会被删掉。这个应用每天的视频总大小有上限（`community_video_gb`）。
+         */
+        post: operations["createCommunityVideoUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/community/videos/{asset_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 传完了，开始转码（重复调用没有副作用） */
+        post: operations["completeCommunityVideoUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/community/videos/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 看转码状态（只限这个应用替这个人传的） */
+        get: operations["getCommunityVideo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/community/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 这个应用替这个人发过的帖子（这个人自己发的、别的应用发的都看不到） */
+        get: operations["listCommunityPosts"];
+        put?: never;
+        /**
+         * 用这个人的名义发一条公开帖子（文字、最多 9 张图或 1 个视频、最多 10 个标签）
+         * @description 规则和审核都和这个人自己发帖一样，帖子上写明「来自 <应用名>」。没有 `title` 时取正文第一句，没有文字时必须给 `title`。
+         *     `uuid` 是幂等键：同一个 `uuid` 一小时内只发一次，重复调用返回同一条帖子。
+         *
+         *     不能替人同意：这个人还没同意公开作者身份，或者撤回了同意，返回 409 `details.reason = consent_required`，带 `details.consent_url`，
+         *     请这个人自己去点。视频没转好是 409 `video_not_ready`，转码失败是 409 `video_failed`。
+         *     平台没有定时发、存草稿；被拒的帖子进这个人的草稿箱，应用收到 `community.post_reviewed`。
+         *
+         *     限额：这个人每小时 20 帖（和他自己发的算在一起，`post_rate_limited`）；这个应用替这个人每天 10 帖（`app_user_daily_limit`）；
+         *     这个应用每天的总量（`daily_quota_exceeded`，`details.kind = community_posts`）。
+         *
+         *     **机构令牌**（机构号发帖）：用机构的社区账号发，帖子作者是机构（机构名、logo），同样写明「来自 <应用名>」、同样审核，审核结果记在应用头上。
+         *     要机构装了这个应用、批了 `community:post`；机构的主页还没发布过、没有社区账号时 409 `no_org_account`。机构号每小时 20 帖、
+         *     这个应用替这家机构每天 10 帖，和应用每天的总量算在一起。机构号的帖子没有 IP 属地和发布地。上传图片、视频，列出、查看、删除帖子
+         *     也都用机构令牌，只碰这个应用替这家机构传的、发的。
+         */
+        post: operations["createCommunityPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/community/posts/{post_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一条帖子的状态（只限这个应用发的，别的都是 404） */
+        get: operations["getCommunityPost"];
+        put?: never;
+        post?: never;
+        /** 删帖（只限这个应用发的，别的都是 404） */
+        delete: operations["deleteCommunityPost"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/community/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 发帖能选的分类（本区开着的） */
+        get: operations["listCommunityCategories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 这个人的课表：他的课次、报名的活动、确认的试听和考试（给日历类应用；只读）
+         * @description 时间范围最长 100 天。别的区的课次也在里面（在它们所在的区读）。取消的课次也列出来（`cancelled`），方便日历把它去掉。
+         */
+        get: operations["getMySchedule"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/courses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 这个人在学的课和进度（学完几课、最后学习时间；等级和目标是金牌专属的画像，不在这里） */
+        get: operations["listMyCourses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/words": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 这个人的生词本：字词、拼音、复习状态（不给释义，也改不了复习记录） */
+        get: operations["listMyWords"];
+        put?: never;
+        /** 往这个人的生词本里加一个词（已经有时不变；来源记成这个应用） */
+        post: operations["addMyWord"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/classes/{class_id}/exams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 班级的考试（只限机构令牌、本机构） */
+        get: operations["listClassExams"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/classes/{class_id}/exams/{exam_id}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一场考试每个学员的结果（公布以后才有分数；只限机构令牌、本机构） */
+        get: operations["listClassExamResults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export interface webhooks {
     event: {
@@ -930,7 +1386,7 @@ export interface components {
          * @description 错误的细分原因（`error.details.reason`）
          * @enum {string}
          */
-        OpenErrorReason: "invalid_credentials" | "invalid_token" | "token_expired" | "token_type" | "app_disabled" | "not_installed" | "not_available" | "scope_denied" | "scope_pending" | "scope_not_declared" | "gold_only" | "rate_limited" | "daily_quota_exceeded" | "code_expired" | "code_used" | "code_invalid" | "redirect_uri_mismatch" | "origin_not_trusted" | "ip_not_allowed";
+        OpenErrorReason: "invalid_credentials" | "invalid_token" | "token_expired" | "token_type" | "app_disabled" | "not_installed" | "not_available" | "scope_denied" | "scope_pending" | "scope_not_declared" | "gold_only" | "rate_limited" | "daily_quota_exceeded" | "code_expired" | "code_used" | "code_invalid" | "redirect_uri_mismatch" | "origin_not_trusted" | "ip_not_allowed" | "org_not_installed" | "minor_not_allowed" | "birth_year_required" | "feature_disabled" | "app_post_stopped" | "consent_required" | "video_not_ready" | "video_failed" | "post_rate_limited" | "app_user_daily_limit" | "post_in_progress" | "no_org_account" | "teacher_busy" | "online_only" | "venue_unavailable" | "venue_not_found" | "slot_overlap" | "slot_taken" | "not_draft" | "not_editable" | "org_not_verified" | "opening_ended" | "opening_incomplete";
         ErrorResponse: {
             error: {
                 /** @enum {string} */
@@ -942,12 +1398,17 @@ export interface components {
                     reason?: components["schemas"]["OpenErrorReason"];
                     scope?: string;
                     never_ask?: boolean;
+                    /** @description `consent_required` 时给：请这个人打开它，自己点同意 */
+                    consent_url?: string;
                 } & {
                     [key: string]: unknown;
                 };
             };
         };
-        /** @description 一个人在一个应用里的 ID（同一个人在不同应用里不同，和 OIDC 的 `sub` 相同） */
+        /**
+         * @description 一个人在一个应用里的 ID（同一个人在不同应用里不同，和 OIDC 的 `sub` 相同）。同一个应用被几家机构安装时，同一个人的 `open_id`
+         *     是同一个；开发者协议禁止用它跨机构比对。
+         */
         OpenId: string;
         /** @description 装了应用的机构（`<机构所在区>.<机构 ID>`） */
         TenantKey: string;
@@ -956,7 +1417,7 @@ export interface components {
         /** @description 权限码（目录见 `ScopeCode`；平台的 `GET /api/v1/open/scopes` 返回带说明的目录） */
         Scope: string;
         /** @enum {string} */
-        ScopeCode: "openid" | "profile" | "org:member:readonly" | "org:member" | "class:readonly" | "class:member" | "schedule:readonly" | "schedule" | "attendance:readonly" | "coursework" | "grade:readonly" | "course" | "learning:progress:readonly" | "im:message:send_as_bot" | "im:chat:readonly" | "notify:send" | "live:recording:readonly" | "event" | "event:registration:readonly" | "job" | "job:candidate:readonly" | "trial" | "trade:order:readonly" | "review" | "profile:interest:readonly" | "profile:interest" | "profile:learning:readonly" | "report:create";
+        ScopeCode: "openid" | "profile" | "org:member:readonly" | "org:member" | "class:readonly" | "class:member" | "schedule:readonly" | "schedule" | "attendance:readonly" | "coursework" | "grade:readonly" | "course" | "learning:progress:readonly" | "im:message:send_as_bot" | "im:chat:readonly" | "notify:send" | "live:recording:readonly" | "event" | "event:registration:readonly" | "job" | "job:candidate:readonly" | "trial" | "trade:order:readonly" | "trade:booking:readonly" | "venue:readonly" | "venue" | "opening:readonly" | "review" | "profile:interest:readonly" | "profile:interest" | "profile:learning:readonly" | "report:create" | "community:post" | "me:schedule:readonly" | "me:learning:readonly" | "me:words:readonly" | "me:words" | "insights:readonly";
         /** @enum {string} */
         OrgRole: "owner" | "admin" | "academic" | "editor" | "content_reviewer" | "teacher" | "community" | "recruiter" | "member";
         AppCredentials: {
@@ -1017,6 +1478,11 @@ export interface components {
             /** Format: uuid */
             class_id: string;
             name: string;
+            /**
+             * @description class 班级；lecture 公开课；event 活动
+             * @enum {string}
+             */
+            kind: "class" | "lecture" | "event";
             description?: string | null;
             student_count: number;
             /** Format: date-time */
@@ -1040,10 +1506,39 @@ export interface components {
             starts_at: string;
             /** Format: date-time */
             ends_at: string;
-            /** @enum {string} */
-            status: "scheduled" | "live" | "ended" | "cancelled";
-            /** @description 是不是在在线课堂里上（课次都是） */
+            /**
+             * @description draft 是还没上架的班的课次（只在排课的回应里出现，不进课表）
+             * @enum {string}
+             */
+            status: "draft" | "scheduled" | "live" | "ended" | "cancelled";
+            /** @description 在线课堂里上为 true；在教学点上（`place` 不为 null）为 false */
             live?: boolean;
+            /** @description 在哪个教学点上；null 在线 */
+            place?: components["schemas"]["OpenPlace"] | null;
+            /** @description 上这次课的老师 */
+            teacher_open_id?: components["schemas"]["OpenId"] | null;
+        };
+        OpenPlaceInput: {
+            /**
+             * Format: uuid
+             * @description 本机构的教学点（`GET /venues`）
+             */
+            venue_id: string;
+            /** @description 教室、楼层等，只给上课的人看 */
+            note?: string | null;
+        };
+        /** @description 上课的地点：教学点公开的地址，加上教室 */
+        OpenPlace: {
+            /** Format: uuid */
+            venue_id: string;
+            name: string;
+            address: string;
+            city?: string | null;
+            /** @description ISO 3166-1 两位代码 */
+            country?: string | null;
+            time_zone?: string | null;
+            /** @description 教室 */
+            note?: string | null;
         };
         AttendanceRecord: {
             open_id: components["schemas"]["OpenId"];
@@ -1267,13 +1762,25 @@ export interface components {
             booked: number;
             pending: number;
             course_title: string;
+            /** @description 一直是 null（以前按周重复的一组时间共用一个） */
             series_id?: string | null;
-            /** @enum {string} */
+            /**
+             * @description open 还能约或已经约了；cancelled 关掉了
+             * @enum {string}
+             */
             status: "open" | "cancelled";
+            /**
+             * Format: uuid
+             * @description 属于哪份试听（`GET /openings/{opening_id}`）
+             */
+            opening_id: string;
+            /** @description 上这个时间的老师；试听还缺老师时为 null */
+            teacher_open_id?: components["schemas"]["OpenId"] | null;
         };
         TrialBooking: {
             /** Format: uuid */
             booking_id: string;
+            /** @description 上课的教学点（`/trial/venues` 的 `venue_id`） */
             venue_id?: string;
             open_id?: components["schemas"]["OpenId"];
             status: string;
@@ -1283,6 +1790,323 @@ export interface components {
             ends_at?: string | null;
             course_title?: string | null;
         };
+        OpenVenue: {
+            /** Format: uuid */
+            venue_id: string;
+            name: string;
+            /**
+             * @description campus 校区；point 教学点；partner 合作点
+             * @enum {string}
+             */
+            kind: "campus" | "point" | "partner";
+            /**
+             * @description 草稿、等本机构审核、被退回、已发布、停用、被语合中心下架
+             * @enum {string}
+             */
+            status: "draft" | "pending" | "returned" | "published" | "closed" | "taken_down";
+            /** @description 现在给不给人看（发布过，没停用、没被下架；改了还没再审时照旧显示上一次发布的） */
+            shown: boolean;
+            /** @description ISO 3166-1 两位代码 */
+            country: string;
+            city?: string | null;
+            address: string;
+            /** @description 地图上的点；没选点时为 null */
+            location?: null | {
+                lat: number;
+                lng: number;
+                /** @enum {string} */
+                datum?: "wgs84" | "bd09";
+            };
+            time_zone: string;
+            /** @description 发布过的公开内容 ID（`<区>:venue:<id>`） */
+            item_id?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description 和机构后台建教学点的请求体相同（`VenueInput`，见 openapi.yaml），但不收「咨询」转给谁和挂在这里的班级、商品、活动（这些在平台里设）。 */
+        OpenVenueCreate: {
+            name: string;
+            /** @enum {string} */
+            kind: "campus" | "point" | "partner";
+            audiences?: ("children" | "adults" | "business")[];
+            course_types?: ("hsk" | "yct" | "conversation" | "business" | "children" | "culture" | "other")[];
+            description?: string;
+            country: string;
+            city?: string | null;
+            address: string;
+            /** @description 在地图上选的点；没给的教学点不上地图 */
+            location?: null | {
+                lat: number;
+                lng: number;
+                /**
+                 * @description 默认 wgs84；bd09 是百度地图的坐标
+                 * @enum {string}
+                 */
+                datum?: "wgs84" | "bd09";
+            };
+            /** @description 交通说明 */
+            transit?: string;
+            /** @description IANA 时区 */
+            time_zone: string;
+            /** @description 每周的开放时间（教学点所在时区的本地时间，一天可以有几段） */
+            hours?: {
+                /** @description 1 星期一 … 7 星期日 */
+                weekday: number;
+                opens: string;
+                /** @description 晚于 opens */
+                closes: string;
+            }[];
+            facilities?: ("wifi" | "projector" | "library" | "lounge" | "parking" | "accessible" | "kids_area" | "recording_room")[];
+            /** @description 公开的联系人 */
+            contact_name?: string | null;
+            /** @description 公开的电话 */
+            contact_phone?: string | null;
+        };
+        OpenOpening: {
+            /**
+             * Format: uuid
+             * @description 有班级的（多人班、公开课）是班级 ID，其余是商品 ID
+             */
+            opening_id: string;
+            /**
+             * @description group 多人班；one_on_one 1v1 课时包；lecture 公开课；trial 试听；video 视频课
+             * @enum {string}
+             */
+            kind: "group" | "one_on_one" | "lecture" | "trial" | "video";
+            /** @enum {string} */
+            status: "draft" | "review" | "enrolling" | "running" | "ended";
+            /** @description 招生中但名额满了 */
+            full?: boolean;
+            title: string;
+            summary?: string;
+            level?: number | null;
+            languages?: string[];
+            /**
+             * Format: uuid
+             * @description 班级（`/classes/{class_id}`）；1v1、试听、视频课没有
+             */
+            class_id?: string | null;
+            /** @description 上过架的商品的公开内容 ID（`<区>:offer:<id>`） */
+            offer_item_id?: string | null;
+            /**
+             * Format: uuid
+             * @description 教的课程（`/courses/{course_id}`）
+             */
+            course_id?: string | null;
+            course_title?: string | null;
+            teachers: {
+                open_id: components["schemas"]["OpenId"];
+                name: string;
+            }[];
+            /** @description 默认地点；null 在线 */
+            place?: components["schemas"]["OpenPlace"] | null;
+            /** @description 课次不都在同一个地方 */
+            mixed_places?: boolean;
+            /**
+             * @description public 公开招生（商品上架）；code 只凭加入码进
+             * @enum {string}
+             */
+            enrollment?: "public" | "code";
+            /** @description 商品在卖（招生中） */
+            listed: boolean;
+            /** @description 名额（多人班、公开课） */
+            seats?: null | {
+                max?: number | null;
+                min?: number | null;
+                taken: number;
+            };
+            price?: null | {
+                amount_minor: number;
+                currency: string;
+            };
+            /** @description 课次进度（有班级的） */
+            sessions: {
+                total: number;
+                done: number;
+                /** Format: date-time */
+                first_starts_at?: string | null;
+                next?: null | {
+                    /** Format: uuid */
+                    session_id: string;
+                    /** Format: date-time */
+                    starts_at: string;
+                    /** Format: date-time */
+                    ends_at: string;
+                    time_zone?: string;
+                    place?: components["schemas"]["OpenPlace"] | null;
+                };
+            };
+            /** @description 1v1 一共几节 */
+            lessons?: number | null;
+            /** @description 1v1、试听每节多长 */
+            lesson_minutes?: number | null;
+            /**
+             * Format: date-time
+             * @description 1v1、试听在卖时最近能约的时间
+             */
+            next_available?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        OpenBooking: {
+            /** Format: uuid */
+            booking_id: string;
+            /** @enum {string} */
+            kind: "one_on_one" | "trial";
+            /**
+             * Format: uuid
+             * @description 约的是哪个开课（`GET /openings/{opening_id}`）
+             */
+            opening_id: string;
+            title: string;
+            open_id: components["schemas"]["OpenId"];
+            teacher_open_id?: components["schemas"]["OpenId"];
+            /** @enum {string} */
+            status: "requested" | "confirmed" | "declined" | "cancelled" | "completed" | "expired" | "missed";
+            /** @description 等回复的改期 */
+            change?: null | {
+                /** @enum {string} */
+                kind: "teacher_moved" | "teacher_proposed" | "learner_requested";
+                /** Format: date-time */
+                to_starts_at: string;
+                /** Format: date-time */
+                to_ends_at: string;
+            };
+            /**
+             * @description 上完以后的结果
+             * @enum {string|null}
+             */
+            outcome?: "held" | "learner_absent" | "teacher_absent" | "both_absent" | null;
+            /** @description 学员在规定时间内取消，这一节不退 */
+            forfeited?: boolean;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            time_zone: string;
+            /** @description 在哪上；null 在线 */
+            place?: components["schemas"]["OpenPlace"] | null;
+            /**
+             * Format: uuid
+             * @description 确认后排的课次
+             */
+            session_id?: string | null;
+            /** @description 用的哪张订单的课时（免费试听为 null） */
+            order_id?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        /** @description 一页看板。数字（`tiles`）和图（`cards`）都按 `key` 给，名字和说明由应用自己写（和平台三端一样按 key 取文案）。 */
+        OpenInsightsPage: {
+            tab: string;
+            /** @description 这个接口能看的页 */
+            tabs: string[];
+            /** @enum {string} */
+            range: "7d" | "30d" | "90d" | "365d" | "custom";
+            /**
+             * Format: date
+             * @description 第一天
+             */
+            from: string;
+            /**
+             * Format: date
+             * @description 最后一天（含）
+             */
+            to: string;
+            /** Format: date */
+            previous_from?: string | null;
+            /** Format: date */
+            previous_to?: string | null;
+            /** @description 机构的时区（算「天」用的） */
+            time_zone: string;
+            /** @enum {string} */
+            granularity: "day" | "week" | "month";
+            /** @description 每个点从哪天开始 */
+            points: string[];
+            compare: boolean;
+            /** Format: date-time */
+            data_until: string;
+            /**
+             * Format: date-time
+             * @description 每日汇总最后算到什么时候；还没算过为 null
+             */
+            summary_at: string | null;
+            /** @description 有别的区没答上，跨区的汇总不全 */
+            partial: boolean;
+            /** @description 能筛的维度和选项 */
+            filters: {
+                courses?: components["schemas"]["OpenInsightsOption"][];
+                venues?: components["schemas"]["OpenInsightsOption"][];
+                currencies?: string[];
+            };
+            tiles: {
+                /** @description 数字的名字 */
+                key: string;
+                unit: components["schemas"]["OpenInsightsUnit"];
+                /** @description 没有分母或少于 5 人时为 null */
+                value: number | null;
+                /** @description 少于 5 人，不给 */
+                withheld: boolean;
+                /** @description 上一周期（`compare` 时才有） */
+                previous?: number | null;
+                /** @description 现在的数（不按时间段算） */
+                current: boolean;
+                currency?: string | null;
+                trend?: (number | null)[];
+            }[];
+            cards: {
+                /** @description 图的名字 */
+                key: string;
+                /** @enum {string} */
+                kind: "line" | "stack" | "hbar" | "funnel" | "heat" | "table";
+                unit: components["schemas"]["OpenInsightsUnit"];
+                currency?: string | null;
+                /** @description 整张图都是少于 5 人的 */
+                withheld: boolean;
+                series?: {
+                    key: string;
+                    label?: string | null;
+                    /** @description 和 `points` 一一对应；null 是没有数或压掉了 */
+                    values: (number | null)[];
+                }[];
+                previous?: (number | null)[];
+                rows?: {
+                    key: string;
+                    label?: string | null;
+                    /** @description null：少于 5 人 */
+                    value: number | null;
+                    share?: number | null;
+                }[];
+                heat?: {
+                    rows?: string[];
+                    cols?: number[];
+                    values?: (number | null)[][];
+                };
+                table?: {
+                    columns?: string[];
+                    units?: components["schemas"]["OpenInsightsUnit"][];
+                    rows?: {
+                        /** @description 课程、活动等的 ID（不会是人） */
+                        id?: string | null;
+                        cells: (number | string | null)[];
+                    }[];
+                    total?: number;
+                };
+            }[];
+        };
+        OpenInsightsOption: {
+            id: string;
+            name: string;
+        };
+        /**
+         * @description `ratio` 是 0–1 的比例；`money` 是最小货币单位（看 `currency`）；`rating` 满分 5；`minutes` 分钟；其余是个数
+         * @enum {string}
+         */
+        OpenInsightsUnit: "count" | "people" | "sessions" | "hours" | "ratio" | "minutes" | "rating" | "money" | "lessons";
         TradeOrder: {
             order_id: string;
             status: string;
@@ -1345,7 +2169,153 @@ export interface components {
          * @description 可订阅的事件（取自通知目录里以机构为中心的事件）。`x-token` 说明按机构还是按用户订阅，`x-scope` 是要的权限。
          * @enum {string}
          */
-        EventType: "app.installed" | "app.uninstalled" | "app.scopes_changed" | "coursework.submitted" | "grade.published" | "schedule.session_changed" | "event.registered" | "job.candidate_applied" | "trade.order_paid" | "review.created" | "trial.booked" | "im.message_received";
+        EventType: "app.installed" | "app.uninstalled" | "app.scopes_changed" | "coursework.submitted" | "grade.published" | "schedule.session_changed" | "event.registered" | "job.candidate_applied" | "trade.order_paid" | "review.created" | "trial.booked" | "im.message_received" | "class.member_changed" | "course.completed" | "exam.results_released" | "event.checked_in" | "live.recording_ready" | "trade.order_refunded" | "trial.confirmed" | "trial.cancelled" | "community.post_reviewed" | "community.video_ready" | "booking.changed";
+        CommunityImageUpload: {
+            /** @description 发帖时写进 `images[].key` */
+            key: string;
+            upload_url: string;
+            /** @enum {string} */
+            method: "PUT";
+            headers: {
+                [key: string]: string;
+            };
+            /** Format: date-time */
+            expires_at: string;
+        };
+        CommunityVideo: {
+            /** Format: uuid */
+            asset_id: string;
+            /**
+             * @description ready 才能发帖；failed 换一个文件重传
+             * @enum {string}
+             */
+            status: "uploading" | "queued" | "processing" | "ready" | "failed";
+            duration_s?: number | null;
+            width?: number | null;
+            height?: number | null;
+            /** @description failed 时的原因代码 */
+            error?: string | null;
+        };
+        CommunityVideoUpload: {
+            /** Format: uuid */
+            asset_id: string;
+            /** @enum {string} */
+            status: "uploading" | "queued" | "processing" | "ready" | "failed";
+            upload: {
+                url: string;
+                /** @enum {string} */
+                method: "PUT";
+                headers: {
+                    [key: string]: string;
+                };
+                /** Format: date-time */
+                expires_at: string;
+            };
+        };
+        /** @description 不接受 `consent`、`as_org_id`、`report_ref`、`city_id`，也不接受用户 IP；写了这些字段返回 400。 */
+        CreateCommunityPost: {
+            /** @description 幂等键，一小时内同一个 uuid 只发一次 */
+            uuid?: string;
+            /** @description 可不填（取正文第一句）；没有文字时必须填 */
+            title?: string;
+            /** @description 正文里的 `#话题` 也算标签 */
+            body?: string;
+            /** @description 最多 9 张，不能和 `video` 同时给 */
+            images?: {
+                /** @description `POST /community/images` 给的 key */
+                key: string;
+            }[];
+            /** @description 转好的视频，不能和 `images` 同时给 */
+            video?: {
+                /** Format: uuid */
+                asset_id: string;
+            };
+            /** @description 标签，和正文里的 `#话题` 合起来最多 10 个；统一转小写，最长 30 字 */
+            topics?: string[];
+            /** @description `GET /community/categories` 的 key；不选时自动判断 */
+            category?: string;
+            /**
+             * @description 只有文字时的背景，默认 paper
+             * @enum {string}
+             */
+            cover_style?: "paper" | "grid" | "bamboo" | "mountains" | "dawn" | "dusk" | "ink" | "plain";
+        };
+        OpenCommunityPost: {
+            /** @description `<区>:post:<uuid>` */
+            post_id: string;
+            /**
+             * @description visible 已显示；in_review 审核中；rejected 被拒（在这个人的草稿箱）；removed 被下架；deleted 这个人或应用删了
+             * @enum {string}
+             */
+            status: "visible" | "in_review" | "rejected" | "removed" | "deleted";
+            /** @description 被拒的原因类别，不给命中的词 */
+            rejection_reason?: string | null;
+            /** @description 帖子链接 */
+            url: string;
+            title: string;
+            /** @description 最终的标签 */
+            topics: string[];
+            /** @description 最终的分类；还没判出来时是 null */
+            category: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        MyScheduleEntry: {
+            /** @enum {string} */
+            kind: "session" | "event" | "trial" | "exam";
+            id: string;
+            title: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            cancelled: boolean;
+            /** @description 打开这一项的页面 */
+            url: string;
+        };
+        MyCourse: {
+            /** @description 公开内容 ID（`<区>:course:<id>`） */
+            course_id: string;
+            title: string;
+            completed_lessons: number;
+            total_lessons: number;
+            /** Format: date-time */
+            last_studied_at: string | null;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        MyWord: {
+            /** @description 简体 */
+            word: string;
+            traditional?: string | null;
+            pinyin?: string | null;
+            /** @enum {string} */
+            status: "learning" | "known";
+            /** Format: date-time */
+            added_at: string;
+            /** @description 复习状态；还没进复习时为 null */
+            review: null | {
+                /** @enum {string} */
+                state: "new" | "learning" | "review" | "relearning";
+                /** Format: date-time */
+                due_at: string | null;
+                /** Format: date-time */
+                last_reviewed_at: string | null;
+                mastered: boolean;
+            };
+        };
+        ClassExam: {
+            /** Format: uuid */
+            exam_id: string;
+            /** Format: uuid */
+            class_id: string;
+            title: string;
+            /** Format: date-time */
+            closes_at: string | null;
+            max_score: number | null;
+            /** @description 结果公布了没有 */
+            released: boolean;
+        };
         EventEnvelope: {
             /** @enum {string} */
             schema: "1.0";
@@ -1437,9 +2407,40 @@ export interface components {
         /**
          * @description FORBIDDEN，`details.reason` 是 `scope_denied`（用户或机构管理员拒绝了，`details.scope`、`details.never_ask`）、
          *     `scope_pending`（新版本加的权限还没问到）、`scope_not_declared`（应用没声明这个权限）、`gold_only`
-         *     （金牌机构专属）或 `token_type`。应用要能降级。
+         *     （金牌机构专属）、`minor_not_allowed`（这个人是未成年人）、`org_not_installed`（用户令牌碰机构的班级或课程，
+         *     那家机构没装这个应用，或没批同一项权限）或 `token_type`。应用要能降级。
          */
         ScopeDenied: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /**
+         * @description FORBIDDEN，除了 `ScopeDenied` 的那些，`details.reason` 还可能是 `minor_not_allowed`（这个人是未成年人，不能授权代发）、
+         *     `birth_year_required`（这个人还没填出生年份，要他自己去填）、`app_post_stopped`（语合运营停了这个应用的发帖权限）。
+         */
+        PostForbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description SERVICE_UNAVAILABLE，`details.reason = feature_disabled`（本区暂时关了发帖，`details.feature = community_post`） */
+        FeatureDisabled: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description PAYLOAD_TOO_LARGE */
+        PayloadTooLarge: {
             headers: {
                 [name: string]: unknown;
             };
@@ -1465,7 +2466,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description RATE_LIMITED（`details.reason`：`rate_limited` 或 `daily_quota_exceeded`） */
+        /** @description RATE_LIMITED（`details.reason`：`rate_limited`、`daily_quota_exceeded`、`post_rate_limited` 或 `app_user_daily_limit`） */
         RateLimited: {
             headers: {
                 "Retry-After"?: number;
@@ -1488,7 +2489,11 @@ export interface components {
         CourseId: string;
         EventId: string;
         JobIdPath: string;
+        OpeningId: string;
+        VenueId: string;
         BookingId: string;
+        AssetId: string;
+        PostId: string;
         OpenIdPath: components["schemas"]["OpenId"];
     };
     requestBodies: never;
@@ -1927,6 +2932,113 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["ScopeDenied"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    createClassSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: components["parameters"]["ClassId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title: string;
+                    /**
+                     * Format: date-time
+                     * @description 第一次课的开始时间
+                     */
+                    starts_at: string;
+                    /**
+                     * Format: date-time
+                     * @description 第一次课的结束时间（最长 12 小时）
+                     */
+                    ends_at: string;
+                    /** @description IANA 时区 */
+                    time_zone: string;
+                    /** @description 上这些课的老师（必须是本班的老师）；不填时用户令牌是本人，机构令牌是班里唯一的那位老师（有几位时必填） */
+                    teacher_open_id?: components["schemas"]["OpenId"];
+                    /** @description 按周重复；`until`（含当天）和 `count` 二选一。第一次课那天的星期几必须在 `weekdays` 里。 */
+                    recurrence?: {
+                        /** @description 星期几（1 = 周一 … 7 = 周日），按 `time_zone` 的当地日期 */
+                        weekdays: number[];
+                        /**
+                         * Format: date
+                         * @description 最后一天（当地日期，含当天）
+                         */
+                        until?: string;
+                        /** @description 一共几次 */
+                        count?: number;
+                    };
+                    /** @description 地点：不传跟着班级，`null` 在线 */
+                    place?: components["schemas"]["OpenPlaceInput"] | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["OpenSession"][];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    setClassSessionPlace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: components["parameters"]["ClassId"];
+                session_id: components["parameters"]["SessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description 新地点；`null` 在线 */
+                    place: components["schemas"]["OpenPlaceInput"] | null;
+                    /**
+                     * @description this 只改这一次；following 这一次及同一系列以后的课次
+                     * @default this
+                     * @enum {string}
+                     */
+                    scope?: "this" | "following";
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description 改到了的课次 */
+                        items: components["schemas"]["OpenSession"][];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     cancelClassSession: {
@@ -2663,6 +3775,8 @@ export interface operations {
         parameters: {
             query?: {
                 venue_id?: string;
+                /** @description 只列这一个试听的时间 */
+                opening_id?: string;
                 include_past?: boolean;
                 page_size?: components["parameters"]["PageSize"];
                 page_token?: components["parameters"]["PageToken"];
@@ -2698,14 +3812,29 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** Format: uuid */
-                    venue_id: string;
+                    /**
+                     * Format: uuid
+                     * @description 加到这份试听上（不能和 `venue_id`、`course_title`、`teacher_open_id` 一起给）
+                     */
+                    opening_id?: string;
+                    /**
+                     * Format: uuid
+                     * @description 没有 `opening_id` 时必填
+                     */
+                    venue_id?: string;
+                    /** @description 没有 `opening_id` 时必填 */
+                    course_title?: string;
+                    /** @description 上试听的老师（本机构的老师，在机构所在区）；不填时新开的草稿缺老师 */
+                    teacher_open_id?: components["schemas"]["OpenId"];
                     /** Format: date-time */
                     starts_at: string;
                     duration_minutes: number;
+                    /** @description 每个时间几个人一起上 */
                     capacity: number;
-                    course_title: string;
-                    /** @default 0 */
+                    /**
+                     * @description 再按周重复几次（按教学点所在时区的当地时间）
+                     * @default 0
+                     */
                     repeat_weeks?: number;
                 };
             };
@@ -2757,6 +3886,40 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["ScopeDenied"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    setTrialTeacher: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                opening_id: components["parameters"]["OpeningId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    teacher_open_id: components["schemas"]["OpenId"];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenOpening"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listTrialBookings: {
@@ -2813,6 +3976,181 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    listVenues: {
+        parameters: {
+            query?: {
+                status?: "draft" | "pending" | "returned" | "published" | "closed" | "taken_down";
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageMeta"] & {
+                        items: components["schemas"]["OpenVenue"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+        };
+    };
+    createVenue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenVenueCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenVenue"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+        };
+    };
+    getVenue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                venue_id: components["parameters"]["VenueId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenVenue"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listOpenings: {
+        parameters: {
+            query?: {
+                status?: "draft" | "review" | "enrolling" | "running" | "ended";
+                kind?: "group" | "one_on_one" | "lecture" | "trial" | "video";
+                /** @description 只列教这门课程的 */
+                course_id?: string;
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageMeta"] & {
+                        items: components["schemas"]["OpenOpening"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+        };
+    };
+    getOpening: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                opening_id: components["parameters"]["OpeningId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenOpening"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getInsights: {
+        parameters: {
+            query?: {
+                tab?: "enrollment" | "teaching" | "venues" | "income" | "community";
+                /** @description 截止今天（含今天）往前几天；带了 `from`、`to` 时不看它 */
+                range?: "7d" | "30d" | "90d" | "365d";
+                /** @description 自定义时间的第一天（和 `to` 一起带） */
+                from?: string;
+                /** @description 自定义时间的最后一天（含） */
+                to?: string;
+                /** @description 和上一周期比 */
+                compare?: boolean;
+                /** @description 只看这个教学点（校区） */
+                venue_id?: string;
+                /** @description 只看这门课程 */
+                course_id?: string;
+                /** @description 收入页看哪种币种 */
+                currency?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenInsightsPage"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+        };
+    };
     listTradeOrders: {
         parameters: {
             query?: {
@@ -2839,6 +4177,67 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["ScopeDenied"];
+        };
+    };
+    listBookings: {
+        parameters: {
+            query?: {
+                status?: "requested" | "confirmed" | "declined" | "cancelled" | "completed" | "expired" | "missed";
+                kind?: "one_on_one" | "trial";
+                /** @description 只列这一个开课的 */
+                opening_id?: string;
+                /** @description 上课时间不早于 */
+                from?: string;
+                /** @description 上课时间早于 */
+                to?: string;
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageMeta"] & {
+                        items: components["schemas"]["OpenBooking"][];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+        };
+    };
+    getBooking: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                booking_id: components["parameters"]["BookingId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenBooking"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+            404: components["responses"]["NotFound"];
         };
     };
     listTenantReviews: {
@@ -3042,6 +4441,446 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createCommunityImageUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    content_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+                    size_bytes: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommunityImageUpload"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PostForbidden"];
+            429: components["responses"]["RateLimited"];
+            503: components["responses"]["FeatureDisabled"];
+        };
+    };
+    createCommunityVideoUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    filename: string;
+                    /** @description 比如 video/mp4 */
+                    content_type: string;
+                    size_bytes: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommunityVideoUpload"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PostForbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    completeCommunityVideoUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommunityVideo"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PostForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getCommunityVideo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: components["parameters"]["AssetId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommunityVideo"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PostForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listCommunityPosts: {
+        parameters: {
+            query?: {
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageMeta"] & {
+                        items: components["schemas"]["OpenCommunityPost"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PostForbidden"];
+        };
+    };
+    createCommunityPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCommunityPost"];
+            };
+        };
+        responses: {
+            /** @description 已发出（看 `status`）；`uuid` 重复时返回的是原来那条 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenCommunityPost"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PostForbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+            503: components["responses"]["FeatureDisabled"];
+        };
+    };
+    getCommunityPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                post_id: components["parameters"]["PostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenCommunityPost"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PostForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteCommunityPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                post_id: components["parameters"]["PostId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PostForbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listCommunityCategories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: {
+                            /** @description 发帖时写进 `category` */
+                            key: string;
+                            /** @description 按 Accept-Language 本地化的名称 */
+                            name: string;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PostForbidden"];
+        };
+    };
+    getMySchedule: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageMeta"] & {
+                        items: components["schemas"]["MyScheduleEntry"][];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+        };
+    };
+    listMyCourses: {
+        parameters: {
+            query?: {
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageMeta"] & {
+                        items: components["schemas"]["MyCourse"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+        };
+    };
+    listMyWords: {
+        parameters: {
+            query?: {
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageMeta"] & {
+                        items: components["schemas"]["MyWord"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+        };
+    };
+    addMyWord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description 简体或繁体，存成简体 */
+                    word: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已经在生词本里 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWord"];
+                };
+            };
+            /** @description 加进去了 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWord"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listClassExams: {
+        parameters: {
+            query?: {
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path: {
+                class_id: components["parameters"]["ClassId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageMeta"] & {
+                        items: components["schemas"]["ClassExam"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["ScopeDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listClassExamResults: {
+        parameters: {
+            query?: {
+                page_size?: components["parameters"]["PageSize"];
+                page_token?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path: {
+                class_id: components["parameters"]["ClassId"];
+                exam_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageMeta"] & {
+                        /** @description 结果公布了没有；没公布时分数和评语都是 null */
+                        released: boolean;
+                        items: components["schemas"]["OpenSubmission"][];
+                    };
+                };
+            };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["ScopeDenied"];
             404: components["responses"]["NotFound"];

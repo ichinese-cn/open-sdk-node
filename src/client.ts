@@ -11,7 +11,7 @@
  */
 import { OpenApiError } from './errors.ts';
 import { API_PREFIX, DEFAULT_BASE_URL, VERSION } from './gen/meta.ts';
-import { Operations } from './gen/operations.ts';
+import { type BodyOf, Operations, type QueryOf, type ResultOf } from './gen/operations.ts';
 import type {
   CallSpec,
   ClientOptions,
@@ -19,6 +19,7 @@ import type {
   TenantAccessToken,
   TokenType,
   UserAccessToken,
+  WaitVideoOptions,
 } from './types.ts';
 
 interface Cached {
@@ -118,6 +119,200 @@ export class Client extends Operations {
     this.tokens.clear();
   }
 
+  // ── posting in a person's name (D105), and as the institution (M6.21 K2) ─────
+
+  /**
+   * Uploads an image for a post: asks for an upload slot, PUTs the bytes there and returns the `key` to
+   * put in `images[].key`. Up to 10 MB; jpeg, png, webp or gif.
+   */
+  uploadImage(
+    userAccessToken: string,
+    data: Uint8Array | Blob,
+    contentType: BodyOf<'createCommunityImageUpload'>['content_type'],
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string> {
+    return this.uploadImageWith({ userAccessToken, signal: options.signal }, data, contentType);
+  }
+
+  /** `uploadImage` for a post of the institution (its tenant token, `community:post` granted by it). */
+  uploadImageAsOrg(
+    tenantKey: string,
+    data: Uint8Array | Blob,
+    contentType: BodyOf<'createCommunityImageUpload'>['content_type'],
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string> {
+    return this.uploadImageWith({ tenantKey, signal: options.signal }, data, contentType);
+  }
+
+  /**
+   * Uploads a video for a post (up to 4 GB, 1 hour): asks for an upload slot, PUTs the file there and
+   * starts transcoding. A large file goes as a Blob that reads from disk (`await fs.openAsBlob(path)`).
+   * Returns the video's status (`asset_id`); wait for `ready` with `waitVideoReady` before posting.
+   */
+  uploadVideo(
+    userAccessToken: string,
+    data: Uint8Array | Blob,
+    file: { filename: string; contentType: string },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ResultOf<'completeCommunityVideoUpload'>> {
+    return this.uploadVideoWith({ userAccessToken, signal: options.signal }, data, file);
+  }
+
+  /** `uploadVideo` for a post of the institution. */
+  uploadVideoAsOrg(
+    tenantKey: string,
+    data: Uint8Array | Blob,
+    file: { filename: string; contentType: string },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ResultOf<'completeCommunityVideoUpload'>> {
+    return this.uploadVideoWith({ tenantKey, signal: options.signal }, data, file);
+  }
+
+  /**
+   * Waits until a video has been transcoded and returns it (`status: ready`). A failed transcode throws
+   * an OpenApiError with reason `video_failed` (upload another file); running out of time throws one
+   * with code TIMEOUT (reason `video_not_ready`). You also get the `community.video_ready` event.
+   */
+  waitVideoReady(
+    userAccessToken: string,
+    assetId: string,
+    options: WaitVideoOptions = {},
+  ): Promise<ResultOf<'getCommunityVideo'>> {
+    return this.waitVideoWith({ userAccessToken }, assetId, options);
+  }
+
+  /** `waitVideoReady` for a video uploaded for the institution. */
+  waitVideoReadyAsOrg(
+    tenantKey: string,
+    assetId: string,
+    options: WaitVideoOptions = {},
+  ): Promise<ResultOf<'getCommunityVideo'>> {
+    return this.waitVideoWith({ tenantKey }, assetId, options);
+  }
+
+  /**
+   * Posts in the person's name. Without a `uuid` the SDK makes one, so its own retries never post twice;
+   * give your own `uuid` to make your retries safe too (one post per `uuid` within an hour). Errors keep the server's reason: `consent_required`
+   * (send the person to `error.consentUrl`), `video_not_ready`, `video_failed`, `post_rate_limited`,
+   * `app_user_daily_limit`, `daily_quota_exceeded`, `minor_not_allowed`, `app_post_stopped`, …
+   */
+  createPost(
+    userAccessToken: string,
+    post: BodyOf<'createCommunityPost'>,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ResultOf<'createCommunityPost'>> {
+    return this.createPostWith({ userAccessToken, signal: options.signal }, post);
+  }
+
+  /**
+   * Posts as the institution, with its community account (its name and logo; the post says it came from
+   * this app). The institution must have installed the app and granted `community:post`; before its
+   * homepage was first published there is no account yet (409 `no_org_account`). The same limits,
+   * review and `uuid` handling as `createPost`.
+   */
+  createPostAsOrg(
+    tenantKey: string,
+    post: BodyOf<'createCommunityPost'>,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ResultOf<'createCommunityPost'>> {
+    return this.createPostWith({ tenantKey, signal: options.signal }, post);
+  }
+
+  // ── the institution's dashboard (M6.21 K2) ────────────────────────────────
+
+  /**
+   * Every page of the institution's dashboard the API offers (`GET /insights`, `insights:readonly`): the
+   * default page first, then each other tab it lists, with the same query (range, dates, filters). Returns
+   * tab → page. Fewer than five people come back as `null` with `withheld: true`; money is per currency.
+   */
+  async getAllInsights(
+    tenantKey: string,
+    query: Omit<NonNullable<QueryOf<'getInsights'>>, 'tab'> = {},
+    options: { signal?: AbortSignal } = {},
+  ): Promise<Record<string, ResultOf<'getInsights'>>> {
+    const who = { tenantKey, signal: options.signal };
+    const first = await this.getInsights(query as QueryOf<'getInsights'>, who);
+    const out: Record<string, ResultOf<'getInsights'>> = { [first.tab]: first };
+    for (const tab of first.tabs) {
+      if (out[tab]) continue;
+      out[tab] = await this.getInsights({ ...query, tab } as QueryOf<'getInsights'>, who);
+    }
+    return out;
+  }
+
+  private async uploadImageWith(
+    who: RequestOptions,
+    data: Uint8Array | Blob,
+    contentType: BodyOf<'createCommunityImageUpload'>['content_type'],
+  ): Promise<string> {
+    const slot = await this.createCommunityImageUpload({ content_type: contentType, size_bytes: sizeOf(data) }, who);
+    await this.putUpload(slot.upload_url, slot.headers, data, who.signal);
+    return slot.key;
+  }
+
+  private async uploadVideoWith(
+    who: RequestOptions,
+    data: Uint8Array | Blob,
+    file: { filename: string; contentType: string },
+  ): Promise<ResultOf<'completeCommunityVideoUpload'>> {
+    const slot = await this.createCommunityVideoUpload(
+      { filename: file.filename, content_type: file.contentType, size_bytes: sizeOf(data) },
+      who,
+    );
+    await this.putUpload(slot.upload.url, slot.upload.headers, data, who.signal);
+    // Calling it again has no effect, so it is retried like a GET.
+    return this.send<ResultOf<'completeCommunityVideoUpload'>>(
+      'POST',
+      `/community/videos/${encodeURIComponent(slot.asset_id)}/complete`,
+      { auth: this.postingAuth('completeCommunityVideoUpload', who), retryPost: true },
+    );
+  }
+
+  private async waitVideoWith(
+    who: RequestOptions,
+    assetId: string,
+    options: WaitVideoOptions,
+  ): Promise<ResultOf<'getCommunityVideo'>> {
+    const deadline = Date.now() + (options.timeoutMs ?? 30 * 60_000);
+    let interval = options.intervalMs ?? 2_000;
+    const maxInterval = options.maxIntervalMs ?? 15_000;
+    for (;;) {
+      const video = await this.getCommunityVideo(assetId, { ...who, signal: options.signal });
+      if (video.status === 'ready') return video;
+      if (video.status === 'failed') {
+        throw new OpenApiError({
+          status: 409,
+          code: 'CONFLICT',
+          message: `video ${assetId} could not be transcoded${video.error ? ` (${video.error})` : ''}`,
+          details: { reason: 'video_failed', asset_id: assetId, error: video.error ?? null },
+        });
+      }
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        throw new OpenApiError({
+          status: 0,
+          code: 'TIMEOUT',
+          message: `video ${assetId} is not ready yet (${video.status})`,
+          details: { reason: 'video_not_ready', asset_id: assetId, status: video.status },
+        });
+      }
+      await this.sleep(Math.min(interval, left), options.signal);
+      interval = Math.min(interval * 2, maxInterval);
+    }
+  }
+
+  private createPostWith(
+    who: RequestOptions,
+    post: BodyOf<'createCommunityPost'>,
+  ): Promise<ResultOf<'createCommunityPost'>> {
+    const body = post.uuid ? post : { ...post, uuid: crypto.randomUUID() };
+    return this.send<ResultOf<'createCommunityPost'>>('POST', '/community/posts', {
+      body,
+      auth: this.postingAuth('createCommunityPost', who),
+      retryPost: true,
+    });
+  }
+
   // ── calls ─────────────────────────────────────────────────────────────────
 
   /** Any open API call by method and path (`/tenant/members`), for what the generated methods do not cover. */
@@ -168,6 +363,33 @@ export class Client extends Operations {
 
   private credentials() {
     return { app_id: this.appId, app_secret: this.appSecret };
+  }
+
+  private postingAuth(id: string, who: RequestOptions) {
+    const spec: CallSpec = { id, method: 'POST', path: '', pathParams: {}, tokenTypes: ['user', 'tenant'] };
+    return { spec, options: who };
+  }
+
+  /**
+   * PUTs an upload to the slot the platform gave (object storage, not the open API: no token, its own
+   * headers). Not limited by `timeoutMs`, a large video takes as long as it takes; cancel with the signal.
+   */
+  private async putUpload(url: string, headers: Record<string, string>, data: Uint8Array | Blob, signal?: AbortSignal) {
+    let res: Response;
+    try {
+      res = await this.fetchFn(url, { method: 'PUT', headers, body: data as BodyInit, signal });
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      throw new OpenApiError({ status: 0, code: 'NETWORK', message: `PUT upload: ${(err as Error).message}` });
+    }
+    if (!res.ok) {
+      throw new OpenApiError({
+        status: res.status,
+        code: 'UPLOAD_FAILED',
+        message: `PUT upload: ${res.status} ${res.statusText}`,
+        details: { reason: 'upload_failed', body: (await res.text().catch(() => '')).slice(0, 500) },
+      });
+    }
   }
 
   private async cached(key: string, fetchToken: () => Promise<{ token: string; expiresIn: number }>): Promise<Cached> {
@@ -235,7 +457,10 @@ export class Client extends Operations {
       query?: Record<string, unknown>;
       body?: unknown;
       auth?: { spec: CallSpec; options: RequestOptions };
-      /** Token requests are safe to repeat; exchanging a one-time code is not. */
+      /**
+       * Token requests are safe to repeat; exchanging a one-time code is not. `true` also retries a POST
+       * with a token (one the server makes idempotent: a post with its `uuid`, completing an upload).
+       */
       retryPost?: boolean;
     },
   ): Promise<T> {
@@ -257,7 +482,9 @@ export class Client extends Operations {
       const timeout = AbortSignal.timeout(this.timeoutMs);
       const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
       const canRetry = attempt < this.maxRetries;
-      const idempotent = IDEMPOTENT.has(method) || (method === 'POST' && init.retryPost !== false && !init.auth);
+      const idempotent =
+        IDEMPOTENT.has(method) ||
+        (method === 'POST' && (init.retryPost === true || (init.retryPost !== false && !init.auth)));
       let res: Response;
       try {
         res = await this.fetchFn(this.url(path, init.query), {
@@ -313,6 +540,8 @@ export class Client extends Operations {
     }
   }
 }
+
+const sizeOf = (data: Uint8Array | Blob) => (data instanceof Uint8Array ? data.byteLength : data.size);
 
 async function toError(res: Response): Promise<OpenApiError> {
   let body: { error?: { code?: string; message?: string; request_id?: string; details?: Record<string, unknown> } } =

@@ -44,6 +44,14 @@ export class OpenApiError extends Error {
     return this.details.never_ask === true;
   }
 
+  /**
+   * Where the person agrees to show their name on posts (409 `consent_required`): send them there, an
+   * app cannot agree for them.
+   */
+  get consentUrl(): string | null {
+    return typeof this.details.consent_url === 'string' ? this.details.consent_url : null;
+  }
+
   /** A refused, not yet asked or undeclared scope (403): degrade gracefully. */
   get isScopeError(): boolean {
     return (

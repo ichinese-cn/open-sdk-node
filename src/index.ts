@@ -22,4 +22,5 @@ export type {
   TenantAccessToken,
   TokenType,
   UserAccessToken,
+  WaitVideoOptions,
 } from './types.ts';

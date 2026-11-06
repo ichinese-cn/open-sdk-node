@@ -99,6 +99,16 @@ export abstract class Operations {
     return this.iterate({ id: 'listClassSessions', method: 'GET', path: '/classes/{class_id}/sessions', pathParams: { class_id: classId }, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant', 'user'] }, options);
   }
 
+  /** Schedule a class's sessions (once, or repeating weekly), online or at one of the institution's teaching sites (`POST /classes/{class_id}/sessions`; tenant / user token; scopes: schedule) */
+  createClassSessions(classId: string, body: BodyOf<'createClassSessions'>, options?: RequestOptions): Promise<ResultOf<'createClassSessions'>> {
+    return this.call({ id: 'createClassSessions', method: 'POST', path: '/classes/{class_id}/sessions', pathParams: { class_id: classId }, body, tokenTypes: ['tenant', 'user'] }, options);
+  }
+
+  /** Change where one session (or this one and the later ones of its series) is held (`PUT /classes/{class_id}/sessions/{session_id}/place`; tenant / user token; scopes: schedule) */
+  setClassSessionPlace(classId: string, sessionId: string, body: BodyOf<'setClassSessionPlace'>, options?: RequestOptions): Promise<ResultOf<'setClassSessionPlace'>> {
+    return this.call({ id: 'setClassSessionPlace', method: 'PUT', path: '/classes/{class_id}/sessions/{session_id}/place', pathParams: { class_id: classId, session_id: sessionId }, body, tokenTypes: ['tenant', 'user'] }, options);
+  }
+
   /** Cancel a class session (members are notified, the same as cancelling in the timetable) (`POST /classes/{class_id}/sessions/{session_id}/cancel`; tenant / user token; scopes: schedule) */
   cancelClassSession(classId: string, sessionId: string, options?: RequestOptions): Promise<ResultOf<'cancelClassSession'>> {
     return this.call({ id: 'cancelClassSession', method: 'POST', path: '/classes/{class_id}/sessions/{session_id}/cancel', pathParams: { class_id: classId, session_id: sessionId }, tokenTypes: ['tenant', 'user'] }, options);
@@ -279,7 +289,7 @@ export abstract class Operations {
     return this.iterate({ id: 'listTrialVenues', method: 'GET', path: '/trial/venues', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
   }
 
-  /** Trial lesson slots (by default only those not over yet, by time) (`GET /trial/slots`; tenant token; scopes: trial) */
+  /** Trial times (a trial lesson's own times at teaching sites; by default only those not over yet, by time) (`GET /trial/slots`; tenant token; scopes: trial) */
   listTrialSlots(query?: QueryOf<'listTrialSlots'>, options?: RequestOptions): Promise<ResultOf<'listTrialSlots'>> {
     return this.call({ id: 'listTrialSlots', method: 'GET', path: '/trial/slots', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
   }
@@ -289,14 +299,19 @@ export abstract class Operations {
     return this.iterate({ id: 'listTrialSlots', method: 'GET', path: '/trial/slots', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
   }
 
-  /** Schedule trial lesson slots (they can repeat weekly); the teaching site must be published (`POST /trial/slots`; tenant token; scopes: trial) */
+  /** Open trial times (they can repeat weekly): add them to an existing trial lesson, or open a new trial draft (`POST /trial/slots`; tenant token; scopes: trial) */
   createTrialSlots(body: BodyOf<'createTrialSlots'>, options?: RequestOptions): Promise<ResultOf<'createTrialSlots'>> {
     return this.call({ id: 'createTrialSlots', method: 'POST', path: '/trial/slots', pathParams: {}, body, tokenTypes: ['tenant'] }, options);
   }
 
-  /** Cancel a trial lesson slot (whoever booked it is notified as usual; the booking is cancelled with it) (`POST /trial/slots/{slot_id}/cancel`; tenant token; scopes: trial) */
+  /** Close a trial time (no more bookings; bookings already made stay as they are, and nobody is notified) (`POST /trial/slots/{slot_id}/cancel`; tenant token; scopes: trial) */
   cancelTrialSlot(slotId: string, body?: BodyOf<'cancelTrialSlot'>, options?: RequestOptions): Promise<ResultOf<'cancelTrialSlot'>> {
     return this.call({ id: 'cancelTrialSlot', method: 'POST', path: '/trial/slots/{slot_id}/cancel', pathParams: { slot_id: slotId }, body, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** Fill in (or change) the teacher of a trial draft (`PUT /trial/openings/{opening_id}/teacher`; tenant token; scopes: trial) */
+  setTrialTeacher(openingId: string, body: BodyOf<'setTrialTeacher'>, options?: RequestOptions): Promise<ResultOf<'setTrialTeacher'>> {
+    return this.call({ id: 'setTrialTeacher', method: 'PUT', path: '/trial/openings/{opening_id}/teacher', pathParams: { opening_id: openingId }, body, tokenTypes: ['tenant'] }, options);
   }
 
   /** Trial lesson bookings at the institution's teaching sites (`GET /trial/bookings`; tenant token; scopes: trial) */
@@ -314,6 +329,46 @@ export abstract class Operations {
     return this.call({ id: 'confirmTrialBooking', method: 'POST', path: '/trial/bookings/{booking_id}/confirm', pathParams: { booking_id: bookingId }, tokenTypes: ['tenant'] }, options);
   }
 
+  /** The institution's teaching sites (campuses), newest first (`GET /venues`; tenant token; scopes: venue:readonly, venue, trial) */
+  listVenues(query?: QueryOf<'listVenues'>, options?: RequestOptions): Promise<ResultOf<'listVenues'>> {
+    return this.call({ id: 'listVenues', method: 'GET', path: '/venues', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** Every item of `listVenues`, page after page. */
+  listVenuesAll(query?: Omit<QueryOf<'listVenues'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listVenues'>> {
+    return this.iterate({ id: 'listVenues', method: 'GET', path: '/venues', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** Create a draft teaching site (campus); it is published in the platform and reviewed as usual (`POST /venues`; tenant token; scopes: venue) */
+  createVenue(body: BodyOf<'createVenue'>, options?: RequestOptions): Promise<ResultOf<'createVenue'>> {
+    return this.call({ id: 'createVenue', method: 'POST', path: '/venues', pathParams: {}, body, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** One teaching site (of this institution only) (`GET /venues/{venue_id}`; tenant token; scopes: venue:readonly, venue, trial) */
+  getVenue(venueId: string, options?: RequestOptions): Promise<ResultOf<'getVenue'>> {
+    return this.call({ id: 'getVenue', method: 'GET', path: '/venues/{venue_id}', pathParams: { venue_id: venueId }, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** Openings: every class and course opened (group classes, one-to-ones, open classes, trial lessons, video courses), newest first (`GET /openings`; tenant / user token; scopes: opening:readonly) */
+  listOpenings(query?: QueryOf<'listOpenings'>, options?: RequestOptions): Promise<ResultOf<'listOpenings'>> {
+    return this.call({ id: 'listOpenings', method: 'GET', path: '/openings', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant', 'user'] }, options);
+  }
+
+  /** Every item of `listOpenings`, page after page. */
+  listOpeningsAll(query?: Omit<QueryOf<'listOpenings'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listOpenings'>> {
+    return this.iterate({ id: 'listOpenings', method: 'GET', path: '/openings', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant', 'user'] }, options);
+  }
+
+  /** One opening (`GET /openings/{opening_id}`; tenant / user token; scopes: opening:readonly) */
+  getOpening(openingId: string, options?: RequestOptions): Promise<ResultOf<'getOpening'>> {
+    return this.call({ id: 'getOpening', method: 'GET', path: '/openings/{opening_id}', pathParams: { opening_id: openingId }, tokenTypes: ['tenant', 'user'] }, options);
+  }
+
+  /** One page of the institution's dashboard (read only): enrolment, teaching, teaching sites, income, community and events (`GET /insights`; tenant token; scopes: insights:readonly) */
+  getInsights(query?: QueryOf<'getInsights'>, options?: RequestOptions): Promise<ResultOf<'getInsights'>> {
+    return this.call({ id: 'getInsights', method: 'GET', path: '/insights', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
+  }
+
   /** The institution's orders (read-only, for reconciliation). Write operations involving money are not open (`GET /trade/orders`; tenant token; scopes: trade:order:readonly) */
   listTradeOrders(query?: QueryOf<'listTradeOrders'>, options?: RequestOptions): Promise<ResultOf<'listTradeOrders'>> {
     return this.call({ id: 'listTradeOrders', method: 'GET', path: '/trade/orders', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
@@ -322,6 +377,21 @@ export abstract class Operations {
   /** Every item of `listTradeOrders`, page after page. */
   listTradeOrdersAll(query?: Omit<QueryOf<'listTradeOrders'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listTradeOrders'>> {
     return this.iterate({ id: 'listTradeOrders', method: 'GET', path: '/trade/orders', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** The institution's bookings (one-to-ones and trial lessons, read only for reconciliation), latest lesson first (`GET /bookings`; tenant token; scopes: trade:booking:readonly) */
+  listBookings(query?: QueryOf<'listBookings'>, options?: RequestOptions): Promise<ResultOf<'listBookings'>> {
+    return this.call({ id: 'listBookings', method: 'GET', path: '/bookings', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** Every item of `listBookings`, page after page. */
+  listBookingsAll(query?: Omit<QueryOf<'listBookings'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listBookings'>> {
+    return this.iterate({ id: 'listBookings', method: 'GET', path: '/bookings', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** One booked lesson (`GET /bookings/{booking_id}`; tenant token; scopes: trade:booking:readonly) */
+  getBooking(bookingId: string, options?: RequestOptions): Promise<ResultOf<'getBooking'>> {
+    return this.call({ id: 'getBooking', method: 'GET', path: '/bookings/{booking_id}', pathParams: { booking_id: bookingId }, tokenTypes: ['tenant'] }, options);
   }
 
   /** Reviews of this institution (and its courses and teaching sites) (`GET /reviews`; tenant token; scopes: review) */
@@ -367,5 +437,110 @@ export abstract class Operations {
   /** Report a piece of public content on behalf of a user (it enters the platform's moderation queue; the user can see it in their own report history) (`POST /reports`; user token; scopes: report:create) */
   reportOnBehalf(body: BodyOf<'reportOnBehalf'>, options?: RequestOptions): Promise<ResultOf<'reportOnBehalf'>> {
     return this.call({ id: 'reportOnBehalf', method: 'POST', path: '/reports', pathParams: {}, body, tokenTypes: ['user'] }, options);
+  }
+
+  /** Get an upload URL for an image (it is re-encoded and its EXIF removed when the post is made) (`POST /community/images`; user / tenant token; scopes: community:post) */
+  createCommunityImageUpload(body: BodyOf<'createCommunityImageUpload'>, options?: RequestOptions): Promise<ResultOf<'createCommunityImageUpload'>> {
+    return this.call({ id: 'createCommunityImageUpload', method: 'POST', path: '/community/images', pathParams: {}, body, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** Get an upload URL for a video (up to 4 GB, 1 hour) (`POST /community/videos`; user / tenant token; scopes: community:post) */
+  createCommunityVideoUpload(body: BodyOf<'createCommunityVideoUpload'>, options?: RequestOptions): Promise<ResultOf<'createCommunityVideoUpload'>> {
+    return this.call({ id: 'createCommunityVideoUpload', method: 'POST', path: '/community/videos', pathParams: {}, body, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** The upload is done; start transcoding (calling it again has no side effects) (`POST /community/videos/{asset_id}/complete`; user / tenant token; scopes: community:post) */
+  completeCommunityVideoUpload(assetId: string, options?: RequestOptions): Promise<ResultOf<'completeCommunityVideoUpload'>> {
+    return this.call({ id: 'completeCommunityVideoUpload', method: 'POST', path: '/community/videos/{asset_id}/complete', pathParams: { asset_id: assetId }, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** Transcoding status (only for videos this app uploaded for this person) (`GET /community/videos/{asset_id}`; user / tenant token; scopes: community:post) */
+  getCommunityVideo(assetId: string, options?: RequestOptions): Promise<ResultOf<'getCommunityVideo'>> {
+    return this.call({ id: 'getCommunityVideo', method: 'GET', path: '/community/videos/{asset_id}', pathParams: { asset_id: assetId }, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** Posts this app made in this person's name (the person's own posts and other apps' posts are not visible) (`GET /community/posts`; user / tenant token; scopes: community:post) */
+  listCommunityPosts(query?: QueryOf<'listCommunityPosts'>, options?: RequestOptions): Promise<ResultOf<'listCommunityPosts'>> {
+    return this.call({ id: 'listCommunityPosts', method: 'GET', path: '/community/posts', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** Every item of `listCommunityPosts`, page after page. */
+  listCommunityPostsAll(query?: Omit<QueryOf<'listCommunityPosts'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listCommunityPosts'>> {
+    return this.iterate({ id: 'listCommunityPosts', method: 'GET', path: '/community/posts', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** Publish a public post in this person's name (text, up to 9 images or 1 video, up to 10 topics) (`POST /community/posts`; user / tenant token; scopes: community:post) */
+  createCommunityPost(body: BodyOf<'createCommunityPost'>, options?: RequestOptions): Promise<ResultOf<'createCommunityPost'>> {
+    return this.call({ id: 'createCommunityPost', method: 'POST', path: '/community/posts', pathParams: {}, body, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** The status of one post (only posts this app made; anything else is 404) (`GET /community/posts/{post_id}`; user / tenant token; scopes: community:post) */
+  getCommunityPost(postId: string, options?: RequestOptions): Promise<ResultOf<'getCommunityPost'>> {
+    return this.call({ id: 'getCommunityPost', method: 'GET', path: '/community/posts/{post_id}', pathParams: { post_id: postId }, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** Delete a post (only posts this app made; anything else is 404) (`DELETE /community/posts/{post_id}`; user / tenant token; scopes: community:post) */
+  deleteCommunityPost(postId: string, options?: RequestOptions): Promise<ResultOf<'deleteCommunityPost'>> {
+    return this.call({ id: 'deleteCommunityPost', method: 'DELETE', path: '/community/posts/{post_id}', pathParams: { post_id: postId }, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** Categories a post can be filed under (those enabled in this region) (`GET /community/categories`; user / tenant token; scopes: community:post) */
+  listCommunityCategories(options?: RequestOptions): Promise<ResultOf<'listCommunityCategories'>> {
+    return this.call({ id: 'listCommunityCategories', method: 'GET', path: '/community/categories', pathParams: {}, tokenTypes: ['user', 'tenant'] }, options);
+  }
+
+  /** This person's timetable: their sessions, the events they signed up for, confirmed trial lessons and exams (for calendar apps; read-only) (`GET /me/schedule`; user token; scopes: me:schedule:readonly) */
+  getMySchedule(query: QueryOf<'getMySchedule'>, options?: RequestOptions): Promise<ResultOf<'getMySchedule'>> {
+    return this.call({ id: 'getMySchedule', method: 'GET', path: '/me/schedule', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['user'] }, options);
+  }
+
+  /** Every item of `getMySchedule`, page after page. */
+  getMyScheduleAll(query?: Omit<QueryOf<'getMySchedule'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'getMySchedule'>> {
+    return this.iterate({ id: 'getMySchedule', method: 'GET', path: '/me/schedule', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['user'] }, options);
+  }
+
+  /** The courses this person is studying and their progress (lessons completed, last studied; level and goals belong to the gold-only profile and are not here) (`GET /me/courses`; user token; scopes: me:learning:readonly) */
+  listMyCourses(query?: QueryOf<'listMyCourses'>, options?: RequestOptions): Promise<ResultOf<'listMyCourses'>> {
+    return this.call({ id: 'listMyCourses', method: 'GET', path: '/me/courses', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['user'] }, options);
+  }
+
+  /** Every item of `listMyCourses`, page after page. */
+  listMyCoursesAll(query?: Omit<QueryOf<'listMyCourses'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listMyCourses'>> {
+    return this.iterate({ id: 'listMyCourses', method: 'GET', path: '/me/courses', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['user'] }, options);
+  }
+
+  /** This person's word bank: words, pinyin, review state (no meanings, and review records cannot be changed) (`GET /me/words`; user token; scopes: me:words:readonly, me:words) */
+  listMyWords(query?: QueryOf<'listMyWords'>, options?: RequestOptions): Promise<ResultOf<'listMyWords'>> {
+    return this.call({ id: 'listMyWords', method: 'GET', path: '/me/words', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['user'] }, options);
+  }
+
+  /** Every item of `listMyWords`, page after page. */
+  listMyWordsAll(query?: Omit<QueryOf<'listMyWords'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listMyWords'>> {
+    return this.iterate({ id: 'listMyWords', method: 'GET', path: '/me/words', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['user'] }, options);
+  }
+
+  /** Add a word to this person's word bank (unchanged if it is already there; its source is recorded as this app) (`POST /me/words`; user token; scopes: me:words) */
+  addMyWord(body: BodyOf<'addMyWord'>, options?: RequestOptions): Promise<ResultOf<'addMyWord'>> {
+    return this.call({ id: 'addMyWord', method: 'POST', path: '/me/words', pathParams: {}, body, tokenTypes: ['user'] }, options);
+  }
+
+  /** A class's exams (tenant tokens only, own institution) (`GET /classes/{class_id}/exams`; tenant token; scopes: grade:readonly) */
+  listClassExams(classId: string, query?: QueryOf<'listClassExams'>, options?: RequestOptions): Promise<ResultOf<'listClassExams'>> {
+    return this.call({ id: 'listClassExams', method: 'GET', path: '/classes/{class_id}/exams', pathParams: { class_id: classId }, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** Every item of `listClassExams`, page after page. */
+  listClassExamsAll(classId: string, query?: Omit<QueryOf<'listClassExams'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listClassExams'>> {
+    return this.iterate({ id: 'listClassExams', method: 'GET', path: '/classes/{class_id}/exams', pathParams: { class_id: classId }, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** Each learner's result in one exam (scores only once released; tenant tokens only, own institution) (`GET /classes/{class_id}/exams/{exam_id}/results`; tenant token; scopes: grade:readonly) */
+  listClassExamResults(classId: string, examId: string, query?: QueryOf<'listClassExamResults'>, options?: RequestOptions): Promise<ResultOf<'listClassExamResults'>> {
+    return this.call({ id: 'listClassExamResults', method: 'GET', path: '/classes/{class_id}/exams/{exam_id}/results', pathParams: { class_id: classId, exam_id: examId }, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
+  }
+
+  /** Every item of `listClassExamResults`, page after page. */
+  listClassExamResultsAll(classId: string, examId: string, query?: Omit<QueryOf<'listClassExamResults'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listClassExamResults'>> {
+    return this.iterate({ id: 'listClassExamResults', method: 'GET', path: '/classes/{class_id}/exams/{exam_id}/results', pathParams: { class_id: classId, exam_id: examId }, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
   }
 }

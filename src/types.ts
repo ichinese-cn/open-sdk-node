@@ -46,6 +46,18 @@ export interface ClientOptions {
   userAgent?: string;
 }
 
+/** How `waitVideoReady` polls a video's status. */
+export interface WaitVideoOptions {
+  /** Give up after this many milliseconds (an OpenApiError, code TIMEOUT). Default 30 minutes. */
+  timeoutMs?: number;
+  /** First wait between two looks, in milliseconds; it doubles up to `maxIntervalMs`. Default 2 000. */
+  intervalMs?: number;
+  /** Longest wait between two looks. Default 15 000. */
+  maxIntervalMs?: number;
+  /** Stops waiting. */
+  signal?: AbortSignal;
+}
+
 export interface UserAccessToken {
   access_token: string;
   token_type: 'Bearer';

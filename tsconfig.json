@@ -2,7 +2,8 @@
   "include": [
     "src",
     "test",
-    "examples"
+    "examples",
+    "vitest.config.ts"
   ],
   "compilerOptions": {
     "target": "ES2023",

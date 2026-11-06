@@ -206,6 +206,195 @@ describe('Client', () => {
   });
 });
 
+describe("posting in a person's name", () => {
+  const ASSET = '8a1f2c3d-4e5f-4a6b-9c7d-0e1f2a3b4c5d';
+
+  it('uploads an image: a slot, a PUT with its headers and no token, the key', async () => {
+    let putHeaders: IncomingMessage['headers'] = {};
+    handler = (req, body) => {
+      if (req.url === '/open-apis/v1/community/images') {
+        expect(JSON.parse(body)).toEqual({ content_type: 'image/png', size_bytes: 3 });
+        return {
+          status: 201,
+          body: {
+            key: 'img/k1',
+            upload_url: `${base}/upload/img-1?sig=x`,
+            method: 'PUT',
+            headers: { 'content-type': 'image/png', 'x-amz-meta-a': '1' },
+            expires_at: '2026-11-06T10:00:00Z',
+          },
+        };
+      }
+      putHeaders = req.headers;
+      return { status: 200 };
+    };
+    expect(await client().uploadImage('cn.u-1', new Uint8Array([1, 2, 3]), 'image/png')).toBe('img/k1');
+    expect(seen.map((s) => `${s.method} ${s.url}`)).toEqual([
+      'POST /open-apis/v1/community/images',
+      'PUT /upload/img-1?sig=x',
+    ]);
+    expect(seen[0]!.auth).toBe('Bearer cn.u-1');
+    expect(seen[1]!.auth).toBeUndefined();
+    expect(seen[1]!.body).toBe('\u0001\u0002\u0003');
+    expect(putHeaders['x-amz-meta-a']).toBe('1');
+    expect(putHeaders['content-type']).toBe('image/png');
+  });
+
+  it('turns a refused PUT into an OpenApiError', async () => {
+    handler = (req) =>
+      req.url === '/open-apis/v1/community/images'
+        ? {
+            status: 201,
+            body: { key: 'k', upload_url: `${base}/upload/x`, method: 'PUT', headers: {}, expires_at: '' },
+          }
+        : { status: 403 };
+    await expect(client().uploadImage('u', new Uint8Array([1]), 'image/jpeg')).rejects.toMatchObject({
+      status: 403,
+      code: 'UPLOAD_FAILED',
+    });
+  });
+
+  it('uploads a video: create, PUT, complete', async () => {
+    handler = (req, body) => {
+      if (req.url === '/open-apis/v1/community/videos') {
+        expect(JSON.parse(body)).toEqual({ filename: 'a.mp4', content_type: 'video/mp4', size_bytes: 4 });
+        return {
+          status: 201,
+          body: {
+            asset_id: ASSET,
+            status: 'uploading',
+            upload: { url: `${base}/upload/v-1`, method: 'PUT', headers: { 'x-h': 'v' }, expires_at: '' },
+          },
+        };
+      }
+      if (req.url === `/open-apis/v1/community/videos/${ASSET}/complete`)
+        return { status: 200, body: { asset_id: ASSET, status: 'queued' } };
+      expect(req.headers['x-h']).toBe('v');
+      return { status: 200 };
+    };
+    const v = await client().uploadVideo('u', new Blob([new Uint8Array([1, 2, 3, 4])]), {
+      filename: 'a.mp4',
+      contentType: 'video/mp4',
+    });
+    expect(v).toEqual({ asset_id: ASSET, status: 'queued' });
+    expect(seen.map((s) => `${s.method} ${s.url}`)).toEqual([
+      'POST /open-apis/v1/community/videos',
+      'PUT /upload/v-1',
+      `POST /open-apis/v1/community/videos/${ASSET}/complete`,
+    ]);
+    expect(seen[2]!.auth).toBe('Bearer u');
+  });
+
+  it('waits until a video is ready', async () => {
+    const states = ['queued', 'processing', 'ready'];
+    handler = () => ({ status: 200, body: { asset_id: ASSET, status: states.shift(), duration_s: 12 } });
+    const v = await client().waitVideoReady('u', ASSET, { intervalMs: 1 });
+    expect(v).toMatchObject({ status: 'ready', duration_s: 12 });
+    expect(seen).toHaveLength(3);
+    expect(seen[0]!.url).toBe(`/open-apis/v1/community/videos/${ASSET}`);
+  });
+
+  it('throws video_failed when the transcode failed, TIMEOUT when it takes too long', async () => {
+    handler = () => ({ status: 200, body: { asset_id: ASSET, status: 'failed', error: 'unsupported_codec' } });
+    await expect(client().waitVideoReady('u', ASSET, { intervalMs: 1 })).rejects.toMatchObject({
+      reason: 'video_failed',
+      details: { error: 'unsupported_codec' },
+    });
+    handler = () => ({ status: 200, body: { asset_id: ASSET, status: 'processing' } });
+    const e = (await client()
+      .waitVideoReady('u', ASSET, { timeoutMs: 30, intervalMs: 5 })
+      .catch((x: unknown) => x)) as OpenApiError;
+    expect(e).toBeInstanceOf(OpenApiError);
+    expect([e.code, e.reason]).toEqual(['TIMEOUT', 'video_not_ready']);
+  });
+
+  it('posts with a uuid it made, the same one on its own retries, and keeps a given one', async () => {
+    let calls = 0;
+    handler = () => (++calls === 1 ? err(503, 'SERVICE_UNAVAILABLE') : { status: 201, body: { post_id: 'cn:post:1' } });
+    await client().createPost('u', { body: '你好 #学中文' });
+    const sent = seen.map((s) => JSON.parse(s.body) as { uuid: string; body: string });
+    expect(sent).toHaveLength(2);
+    expect(sent[0]!.uuid).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sent[1]!.uuid).toBe(sent[0]!.uuid);
+    expect(sent[0]!.body).toBe('你好 #学中文');
+
+    seen.length = 0;
+    await client().createPost('u', { uuid: 'mine-1', title: 'T' });
+    expect(JSON.parse(seen[0]!.body)).toEqual({ uuid: 'mine-1', title: 'T' });
+  });
+
+  it('posts as the institution: its tenant token, a uuid it made, and its uploads (K2)', async () => {
+    handler = (req) => {
+      const t = tokens(req);
+      if (t) return t;
+      if (req.url === '/open-apis/v1/community/images') {
+        return {
+          status: 201,
+          body: { key: 'img/org', upload_url: `${base}/upload/org-1`, method: 'PUT', headers: {}, expires_at: '' },
+        };
+      }
+      if (req.url === '/open-apis/v1/community/posts') return { status: 201, body: { post_id: 'cn:post:2' } };
+      return { status: 200 };
+    };
+    const c = client();
+    expect(await c.uploadImageAsOrg('cn.x', new Uint8Array([9]), 'image/png')).toBe('img/org');
+    await c.createPostAsOrg('cn.x', { body: '招生啦', images: [{ key: 'img/org' }] });
+    const calls = seen.filter((s) => !s.url.includes('/auth/'));
+    expect(calls.map((s) => `${s.method} ${s.url}`)).toEqual([
+      'POST /open-apis/v1/community/images',
+      'PUT /upload/org-1',
+      'POST /open-apis/v1/community/posts',
+    ]);
+    expect(calls[0]!.auth).toMatch(/^Bearer cn\.t-/);
+    expect(calls[1]!.auth).toBeUndefined();
+    expect(calls[2]!.auth).toBe(calls[0]!.auth);
+    const sent = JSON.parse(calls[2]!.body) as { uuid: string; body: string };
+    expect(sent.uuid).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sent.body).toBe('招生啦');
+  });
+
+  it('reads every dashboard page the API offers, with the same query (K2)', async () => {
+    handler = (req) => {
+      const t = tokens(req);
+      if (t) return t;
+      const u = new URL(req.url ?? '/', base);
+      const tab = u.searchParams.get('tab') ?? 'enrollment';
+      return {
+        status: 200,
+        body: { tab, tabs: ['enrollment', 'teaching', 'income'], range: u.searchParams.get('range') },
+      };
+    };
+    const pages = await client().getAllInsights('cn.x', { range: '7d' });
+    expect(Object.keys(pages)).toEqual(['enrollment', 'teaching', 'income']);
+    expect(pages.income).toMatchObject({ tab: 'income', range: '7d' });
+    const calls = seen.filter((s) => !s.url.includes('/auth/'));
+    expect(calls.map((s) => s.url)).toEqual([
+      '/open-apis/v1/insights?range=7d',
+      '/open-apis/v1/insights?range=7d&tab=teaching',
+      '/open-apis/v1/insights?range=7d&tab=income',
+    ]);
+    expect(calls[0]!.auth).toMatch(/^Bearer cn\.t-/);
+  });
+
+  it('keeps consent_required and the consent URL', async () => {
+    handler = () => ({
+      status: 409,
+      body: {
+        error: {
+          code: 'CONFLICT',
+          message: 'consent',
+          details: { reason: 'consent_required', consent_url: 'https://www.ichinese.cn/consent/x' },
+        },
+      },
+    });
+    const e = (await client()
+      .createPost('u', { body: 'x' })
+      .catch((x: unknown) => x)) as OpenApiError;
+    expect([e.status, e.reason, e.consentUrl]).toEqual([409, 'consent_required', 'https://www.ichinese.cn/consent/x']);
+    expect(seen).toHaveLength(1);
+  });
+});
+
 describe('events', () => {
   // Beside this file in the SDK's own repository; in the monorepo, shared by every SDK.
   const local = resolve(import.meta.dirname, 'test-vectors.json');
