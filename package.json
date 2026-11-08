@@ -1,6 +1,6 @@
 {
   "name": "@ichinese/open-sdk",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.4",
   "description": "Server SDK for the iChinese open platform (open API, tokens, events, web login): Node.js 20+",
   "license": "MIT",
   "type": "module",

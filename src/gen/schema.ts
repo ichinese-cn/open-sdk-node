@@ -57,7 +57,7 @@ export interface paths {
          *     两种码都接受：
          *     - **网页免登的授权码**：应用网页在桌面端或手机 App 里调 JS SDK 的 `requestAuthCode()` 拿到，带区前缀、
          *       5 分钟、只能用一次、绑定这个应用和页面来源；不用传 `redirect_uri`。
-         *     - **标准 OIDC 的授权码**：普通浏览器里 JS SDK 退回签发方 `/authorize`（先 `prompt=none` 静默）拿到的码；
+         *     - **标准 OIDC 的授权码**：普通浏览器里 JS SDK 退回签发方 `/auth`（先 `prompt=none` 静默）拿到的码；
          *       要传当时的 `redirect_uri`（和登记的一致），公开客户端用了 PKCE 时传 `code_verifier`。
          *     网关按码的区前缀转到用户的归属区。码过期返回 400 `details.reason = code_expired`，用过返回 400 `code_used`，
          *     不是这个应用的码返回 400 `code_invalid`。
