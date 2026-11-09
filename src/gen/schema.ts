@@ -115,7 +115,7 @@ export interface paths {
         };
         /**
          * 当前用户（用户令牌）
-         * @description 总有 `open_id`；`name`、`avatar_url`、`locale` 要用户批了 `profile`。
+         * @description 总有 `open_id`；`name`、`avatar_url`、`locale` 要用户批了 `profile`。应用声明且用户同意 `phone` / `email` 后，分别返回当前已验证绑定的 `phone_number` / `email`；未声明、未同意、已撤回或未绑定时省略对应字段。两项权限互不依赖，也不依赖 `profile`。
          */
         get: operations["getUserInfo"];
         put?: never;
@@ -1417,7 +1417,7 @@ export interface components {
         /** @description 权限码（目录见 `ScopeCode`；平台的 `GET /api/v1/open/scopes` 返回带说明的目录） */
         Scope: string;
         /** @enum {string} */
-        ScopeCode: "openid" | "profile" | "org:member:readonly" | "org:member" | "class:readonly" | "class:member" | "schedule:readonly" | "schedule" | "attendance:readonly" | "coursework" | "grade:readonly" | "course" | "learning:progress:readonly" | "im:message:send_as_bot" | "im:chat:readonly" | "notify:send" | "live:recording:readonly" | "event" | "event:registration:readonly" | "job" | "job:candidate:readonly" | "trial" | "trade:order:readonly" | "trade:booking:readonly" | "venue:readonly" | "venue" | "opening:readonly" | "review" | "profile:interest:readonly" | "profile:interest" | "profile:learning:readonly" | "report:create" | "community:post" | "me:schedule:readonly" | "me:learning:readonly" | "me:words:readonly" | "me:words" | "insights:readonly";
+        ScopeCode: "openid" | "profile" | "phone" | "email" | "org:member:readonly" | "org:member" | "class:readonly" | "class:member" | "schedule:readonly" | "schedule" | "attendance:readonly" | "coursework" | "grade:readonly" | "course" | "learning:progress:readonly" | "im:message:send_as_bot" | "im:chat:readonly" | "notify:send" | "live:recording:readonly" | "event" | "event:registration:readonly" | "job" | "job:candidate:readonly" | "trial" | "trade:order:readonly" | "trade:booking:readonly" | "venue:readonly" | "venue" | "opening:readonly" | "review" | "profile:interest:readonly" | "profile:interest" | "profile:learning:readonly" | "report:create" | "community:post" | "me:schedule:readonly" | "me:learning:readonly" | "me:words:readonly" | "me:words" | "insights:readonly";
         /** @enum {string} */
         OrgRole: "owner" | "admin" | "academic" | "editor" | "content_reviewer" | "teacher" | "community" | "recruiter" | "member";
         AppCredentials: {
@@ -1456,6 +1456,13 @@ export interface components {
             name?: string;
             avatar_url?: string | null;
             locale?: string;
+            /** @description 应用声明且用户同意 phone 时返回当前已验证绑定的手机号（E.164）；否则省略 */
+            phone_number?: string;
+            /**
+             * Format: email
+             * @description 应用声明且用户同意 email 时返回当前已验证绑定的邮箱；否则省略
+             */
+            email?: string;
         };
         Tenant: {
             tenant_key: components["schemas"]["TenantKey"];
@@ -2673,6 +2680,15 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             429: components["responses"]["RateLimited"];
+            /** @description SERVICE_UNAVAILABLE，归属区身份服务暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     getTenant: {

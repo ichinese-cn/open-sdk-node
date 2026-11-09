@@ -1,6 +1,6 @@
 // Generated from docs/api/open-api.yaml by sdks/tools (pnpm sdk:gen) — do not edit.
 /** The SDK's version (it follows the open API's). */
-export const VERSION = '1.0.0-rc.4';
+export const VERSION = '1.0.0-rc.5';
 /** The open API's address from the release configuration (sdks/release.json); `baseUrl` overrides it. */
 export const DEFAULT_BASE_URL = 'https://open.ichinese.cn';
 export const API_PREFIX = '/open-apis/v1';
@@ -9,6 +9,8 @@ export const API_PREFIX = '/open-apis/v1';
 export const SCOPES = [
   'openid',
   'profile',
+  'phone',
+  'email',
   'org:member:readonly',
   'org:member',
   'class:readonly',
@@ -202,6 +204,8 @@ export const OPERATION_TOKENS: Record<string, readonly ('app' | 'tenant' | 'user
 
 export const SCOPE_OPENID = 'openid';
 export const SCOPE_PROFILE = 'profile';
+export const SCOPE_PHONE = 'phone';
+export const SCOPE_EMAIL = 'email';
 export const SCOPE_ORG_MEMBER_READONLY = 'org:member:readonly';
 export const SCOPE_ORG_MEMBER = 'org:member';
 export const SCOPE_CLASS_READONLY = 'class:readonly';

@@ -115,6 +115,19 @@ describe('Client', () => {
     expect(calls).toBe(3);
   });
 
+  it('preserves independently optional phone and email fields in user info', async () => {
+    for (const contacts of [
+      {},
+      { phone_number: '+8613812345678' },
+      { email: 'user@example.com' },
+      { phone_number: '+8613812345678', email: 'user@example.com' },
+    ]) {
+      handler = () => ({ status: 200, body: { open_id: 'ou_contact', ...contacts } });
+      const user = await client().getUserInfo({ userAccessToken: 'cn.u-1' });
+      expect(user).toEqual({ open_id: 'ou_contact', ...contacts });
+    }
+  });
+
   it('does not retry a daily quota', async () => {
     let calls = 0;
     handler = () => {
