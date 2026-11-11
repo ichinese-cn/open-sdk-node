@@ -1322,6 +1322,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gray/avatar-frames": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取可配发头像框列表
+         * @description 受控接口。仅运营授予开发机构 decor:frames:read 后可调用，包含用户目录隐藏款，不含停用及旧框。
+         */
+        get: operations["listGrayAvatarFrames"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gray/avatar-frame-assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 为指定平台用户临时佩戴头像框
+         * @description 仅运营授予开发机构 decor:frames:assign 后可调用；无需目标用户授权。立即或预约，最长604800秒。本人手动换框优先；预约重叠拒绝。到期恢复本人选择，不授予永久拥有权、不扣用户积分。同幂等键同请求重试返回原记录，不延长有效期。
+         */
+        post: operations["assignGrayAvatarFrame"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gray/community/post-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 获取所有区域的帖子数量
+         * @description 仅运营授予开发机构 community:posts:count 后可调用。当前存量，按原始来源区去重；total排除已删除，visible为公开可见量，不含评论或同步副本。区不可用时partial=true，全站total和visible为null，known字段为已知小计，各区measured_at并非全局事务快照。
+         */
+        get: operations["getGrayCommunityPostCounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export interface webhooks {
     event: {
@@ -1378,6 +1438,63 @@ export interface webhooks {
 }
 export interface components {
     schemas: {
+        GrayFrame: {
+            /**
+             * Format: uuid
+             * @description 运营头像框ID
+             */
+            id: string;
+            /** @description 运营名称 */
+            name: string;
+        };
+        GrayFrameAssignmentBody: {
+            /** @description 平台账号ID；可指定任意平台用户，不要求其使用或授权该应用 */
+            account_id: string;
+            /** Format: uuid */
+            frame_id: string;
+            /**
+             * Format: date-time
+             * @description 省略则服务端立即开始；预约开始不能早于当前时间
+             */
+            starts_at?: string;
+            /**
+             * Format: date-time
+             * @description 必须晚于开始且最多相隔604800秒
+             */
+            ends_at: string;
+            idempotency_key: string;
+        };
+        GrayFrameAssignment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            frame_id: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            replayed: boolean;
+        };
+        GrayPostCounts: {
+            /** @description 全部来源区成功时的未删除原始帖数，不含同步副本或评论；不完整时为null */
+            total: number | null;
+            /** @description 来源区公开可见原始帖数，不完整时为null */
+            visible: number | null;
+            /** @description 已成功来源区的未删除帖小计 */
+            known_total: number;
+            known_visible: number;
+            partial: boolean;
+            /** Format: date-time */
+            measured_at: string;
+            regions: {
+                region: string;
+                total: number | null;
+                visible: number | null;
+                /** Format: date-time */
+                measured_at: string | null;
+                available: boolean;
+            }[];
+        };
         PageMeta: {
             has_more: boolean;
             page_token?: string | null;
@@ -1386,7 +1503,7 @@ export interface components {
          * @description 错误的细分原因（`error.details.reason`）
          * @enum {string}
          */
-        OpenErrorReason: "invalid_credentials" | "invalid_token" | "token_expired" | "token_type" | "app_disabled" | "not_installed" | "not_available" | "scope_denied" | "scope_pending" | "scope_not_declared" | "gold_only" | "rate_limited" | "daily_quota_exceeded" | "code_expired" | "code_used" | "code_invalid" | "redirect_uri_mismatch" | "origin_not_trusted" | "ip_not_allowed" | "org_not_installed" | "minor_not_allowed" | "birth_year_required" | "feature_disabled" | "app_post_stopped" | "consent_required" | "video_not_ready" | "video_failed" | "post_rate_limited" | "app_user_daily_limit" | "post_in_progress" | "no_org_account" | "teacher_busy" | "online_only" | "venue_unavailable" | "venue_not_found" | "slot_overlap" | "slot_taken" | "not_draft" | "not_editable" | "org_not_verified" | "opening_ended" | "opening_incomplete";
+        OpenErrorReason: "invalid_credentials" | "invalid_token" | "token_expired" | "token_type" | "app_disabled" | "not_installed" | "not_available" | "scope_denied" | "gray_api_denied" | "frame_assignment_overlap" | "idempotency_conflict" | "scope_pending" | "scope_not_declared" | "gold_only" | "rate_limited" | "daily_quota_exceeded" | "code_expired" | "code_used" | "code_invalid" | "redirect_uri_mismatch" | "origin_not_trusted" | "ip_not_allowed" | "org_not_installed" | "minor_not_allowed" | "birth_year_required" | "feature_disabled" | "app_post_stopped" | "consent_required" | "video_not_ready" | "video_failed" | "post_rate_limited" | "app_user_daily_limit" | "post_in_progress" | "no_org_account" | "teacher_busy" | "online_only" | "venue_unavailable" | "venue_not_found" | "slot_overlap" | "slot_taken" | "not_draft" | "not_editable" | "org_not_verified" | "opening_ended" | "opening_incomplete";
         ErrorResponse: {
             error: {
                 /** @enum {string} */
@@ -4900,6 +5017,92 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["ScopeDenied"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listGrayAvatarFrames: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                page_token?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 可配发头像框 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["GrayFrame"][];
+                        has_more: boolean;
+                        page_token: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    assignGrayAvatarFrame: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrayFrameAssignmentBody"];
+            };
+        };
+        responses: {
+            /** @description 已保存临时佩戴计划 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrayFrameAssignment"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getGrayCommunityPostCounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 区域数量及完整性 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrayPostCounts"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimited"];
         };
     };
     onEvent: {

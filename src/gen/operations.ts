@@ -543,4 +543,24 @@ export abstract class Operations {
   listClassExamResultsAll(classId: string, examId: string, query?: Omit<QueryOf<'listClassExamResults'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listClassExamResults'>> {
     return this.iterate({ id: 'listClassExamResults', method: 'GET', path: '/classes/{class_id}/exams/{exam_id}/results', pathParams: { class_id: classId, exam_id: examId }, query: query as Record<string, unknown> | undefined, tokenTypes: ['tenant'] }, options);
   }
+
+  /** List assignable avatar frames (`GET /gray/avatar-frames`; app token) */
+  listGrayAvatarFrames(query?: QueryOf<'listGrayAvatarFrames'>, options?: RequestOptions): Promise<ResultOf<'listGrayAvatarFrames'>> {
+    return this.call({ id: 'listGrayAvatarFrames', method: 'GET', path: '/gray/avatar-frames', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['app'] }, options);
+  }
+
+  /** Every item of `listGrayAvatarFrames`, page after page. */
+  listGrayAvatarFramesAll(query?: Omit<QueryOf<'listGrayAvatarFrames'>, 'page_token'>, options?: RequestOptions): AsyncIterable<ItemOf<'listGrayAvatarFrames'>> {
+    return this.iterate({ id: 'listGrayAvatarFrames', method: 'GET', path: '/gray/avatar-frames', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['app'] }, options);
+  }
+
+  /** Temporarily set an avatar frame for any platform user (`POST /gray/avatar-frame-assignments`; app token) */
+  assignGrayAvatarFrame(body: BodyOf<'assignGrayAvatarFrame'>, options?: RequestOptions): Promise<ResultOf<'assignGrayAvatarFrame'>> {
+    return this.call({ id: 'assignGrayAvatarFrame', method: 'POST', path: '/gray/avatar-frame-assignments', pathParams: {}, body, tokenTypes: ['app'] }, options);
+  }
+
+  /** Count posts across all regions (`GET /gray/community/post-counts`; app token) */
+  getGrayCommunityPostCounts(options?: RequestOptions): Promise<ResultOf<'getGrayCommunityPostCounts'>> {
+    return this.call({ id: 'getGrayCommunityPostCounts', method: 'GET', path: '/gray/community/post-counts', pathParams: {}, tokenTypes: ['app'] }, options);
+  }
 }

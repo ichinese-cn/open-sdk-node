@@ -1,6 +1,6 @@
 // Generated from docs/api/open-api.yaml by sdks/tools (pnpm sdk:gen) — do not edit.
 /** The SDK's version (it follows the open API's). */
-export const VERSION = '1.0.0-rc.5';
+export const VERSION = '1.0.0-rc.6';
 /** The open API's address from the release configuration (sdks/release.json); `baseUrl` overrides it. */
 export const DEFAULT_BASE_URL = 'https://open.ichinese.cn';
 export const API_PREFIX = '/open-apis/v1';
@@ -88,6 +88,9 @@ export const ERROR_REASONS = [
   'not_installed',
   'not_available',
   'scope_denied',
+  'gray_api_denied',
+  'frame_assignment_overlap',
+  'idempotency_conflict',
   'scope_pending',
   'scope_not_declared',
   'gold_only',
@@ -200,6 +203,9 @@ export const OPERATION_TOKENS: Record<string, readonly ('app' | 'tenant' | 'user
   addMyWord: ['user'],
   listClassExams: ['tenant'],
   listClassExamResults: ['tenant'],
+  listGrayAvatarFrames: ['app'],
+  assignGrayAvatarFrame: ['app'],
+  getGrayCommunityPostCounts: ['app'],
 };
 
 export const SCOPE_OPENID = 'openid';
