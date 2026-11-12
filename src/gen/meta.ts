@@ -1,6 +1,6 @@
 // Generated from docs/api/open-api.yaml by sdks/tools (pnpm sdk:gen) — do not edit.
 /** The SDK's version (it follows the open API's). */
-export const VERSION = '1.0.0-rc.6';
+export const VERSION = '1.0.0-rc.7';
 /** The open API's address from the release configuration (sdks/release.json); `baseUrl` overrides it. */
 export const DEFAULT_BASE_URL = 'https://open.ichinese.cn';
 export const API_PREFIX = '/open-apis/v1';

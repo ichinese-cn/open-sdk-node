@@ -366,6 +366,21 @@ describe("posting in a person's name", () => {
     expect(sent.body).toBe('招生啦');
   });
 
+  it('sends a Chinese gray post-count topic once-encoded using the app token', async () => {
+    handler = (req) => {
+      const auth = tokens(req);
+      if (auth) return auth;
+      const url = new URL(req.url ?? '/', base);
+      expect(url.pathname).toBe('/open-apis/v1/gray/community/post-counts');
+      expect(url.searchParams.get('topic')).toBe('国际中文教育');
+      expect(url.search).not.toContain('%25');
+      return { status: 200, body: { topic: '国际中文教育', total: 12, partial: false, regions: [] } };
+    };
+    const result = await client().getGrayCommunityPostCounts({ topic: '国际中文教育' });
+    expect(result.total).toBe(12);
+    expect(seen.at(-1)?.auth).toBe('Bearer cn.a-1');
+  });
+
   it('reads every dashboard page the API offers, with the same query (K2)', async () => {
     handler = (req) => {
       const t = tokens(req);

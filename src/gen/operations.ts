@@ -559,8 +559,8 @@ export abstract class Operations {
     return this.call({ id: 'assignGrayAvatarFrame', method: 'POST', path: '/gray/avatar-frame-assignments', pathParams: {}, body, tokenTypes: ['app'] }, options);
   }
 
-  /** Count posts across all regions (`GET /gray/community/post-counts`; app token) */
-  getGrayCommunityPostCounts(options?: RequestOptions): Promise<ResultOf<'getGrayCommunityPostCounts'>> {
-    return this.call({ id: 'getGrayCommunityPostCounts', method: 'GET', path: '/gray/community/post-counts', pathParams: {}, tokenTypes: ['app'] }, options);
+  /** Count posts by topic across all five regions (`GET /gray/community/post-counts`; app token) */
+  getGrayCommunityPostCounts(query?: QueryOf<'getGrayCommunityPostCounts'>, options?: RequestOptions): Promise<ResultOf<'getGrayCommunityPostCounts'>> {
+    return this.call({ id: 'getGrayCommunityPostCounts', method: 'GET', path: '/gray/community/post-counts', pathParams: {}, query: query as Record<string, unknown> | undefined, tokenTypes: ['app'] }, options);
   }
 }

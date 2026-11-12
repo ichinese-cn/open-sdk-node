@@ -1370,8 +1370,30 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 获取所有区域的帖子数量
-         * @description 仅运营授予开发机构 community:posts:count 后可调用。当前存量，按原始来源区去重；total排除已删除，visible为公开可见量，不含评论或同步副本。区不可用时partial=true，全站total和visible为null，known字段为已知小计，各区measured_at并非全局事务快照。
+         * 按话题获取五区帖子数量及总计
+         * @description 仅运营授予开发机构 `community:posts:count` 后可调用，本接口文档默认不在公开接口目录展示。
+         *     `topic` 支持中文名称，例如 `国际中文教育`。按完整话题名称精确筛选（NFKC、去首尾井号、折叠空白、拉丁字母小写），省略则统计全站。
+         *     SDK 中直接传原始中文字符串，SDK 会自动执行 UTF-8 URL 编码；不要先调用 encodeURIComponent、urlencode 或其他编码函数，以免二次编码。
+         *
+         *     SDK 调用示例（均使用应用令牌）：
+         *
+         *     ```ts
+         *     const counts = await client.getGrayCommunityPostCounts({ topic: '国际中文教育' });
+         *     ```
+         *     ```python
+         *     counts = client.get_gray_community_post_counts({"topic": "国际中文教育"})
+         *     ```
+         *     ```go
+         *     counts, err := client.GetGrayCommunityPostCounts(ctx, opensdk.Params{"topic": "国际中文教育"})
+         *     ```
+         *     ```java
+         *     var counts = client.getGrayCommunityPostCounts(Map.of("topic", "国际中文教育"));
+         *     ```
+         *
+         *     直接发 HTTP 请求时使用 `topic=%E5%9B%BD%E9%99%85%E4%B8%AD%E6%96%87%E6%95%99%E8%82%B2`，或用 cURL 的 `--data-urlencode 'topic=国际中文教育'`。
+         *     始终列出五个在用区；未部署或不可用的区标记 `available=false`。当前存量按原始来源区去重；
+         *     `total` 排除已删除，`visible` 为公开可见量，不含评论或同步副本。区不可用时 `partial=true`，全站 `total` 和 `visible` 为 null，
+         *     `known` 字段为已知小计，各区 `measured_at` 并非全局事务快照。
          */
         get: operations["getGrayCommunityPostCounts"];
         put?: never;
@@ -1476,6 +1498,8 @@ export interface components {
             replayed: boolean;
         };
         GrayPostCounts: {
+            /** @description 规范化后的话题名称；未筛选时为null */
+            topic: string | null;
             /** @description 全部来源区成功时的未删除原始帖数，不含同步副本或评论；不完整时为null */
             total: number | null;
             /** @description 来源区公开可见原始帖数，不完整时为null */
@@ -5082,7 +5106,10 @@ export interface operations {
     };
     getGrayCommunityPostCounts: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 话题名称，支持中文，最多30个字符；可带井号，如“#国际中文教育”；SDK直接传中文，无须手动URL编码；完整名称精确匹配，省略时统计全站 */
+                topic?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
